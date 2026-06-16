@@ -4,6 +4,8 @@ import altair as alt
 import base64
 import os
 import unicodedata
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 # --------------------------------------------------
 # CONFIGURACIÓ GENERAL
@@ -15,13 +17,14 @@ st.set_page_config(
 
 EXCEL_FILE = "Porra_Mundial_Final_Definitiva.xlsx"
 BACKGROUND_IMAGE = "fifa-Trionda.jpg"
+PREU_PARTICIPACIO = 5
 
 
 # --------------------------------------------------
 # FUNCIONS CACHEJADES
 # --------------------------------------------------
 @st.cache_data(show_spinner=False)
-def carregar_dades(excel_file):
+def carregar_dades(excel_file, file_mtime):
     sheets = pd.read_excel(
         excel_file,
         sheet_name=["Porra", "Resultats Reals"],
@@ -68,6 +71,16 @@ def valor_o_pendent(valor):
     return valor_text
 
 
+def obtenir_data_actualitzacio_fitxer(path):
+    if not os.path.exists(path):
+        return "No disponible"
+
+    timestamp = os.path.getmtime(path)
+    dt = datetime.fromtimestamp(timestamp, tz=ZoneInfo("Europe/Madrid"))
+
+    return dt.strftime("%d/%m/%Y %H:%M")
+
+
 def llista_valors_no_buits(df, columna):
     if columna not in df.columns:
         return []
@@ -80,7 +93,35 @@ def llista_valors_no_buits(df, columna):
         .replace("NaT", "")
     )
 
-    return [v for v in valors if v != ""]
+    valors_nets = []
+
+    for valor in valors:
+        if valor == "":
+            continue
+
+        if normalitzar_text(valor) in ["nan", "nat"]:
+            continue
+
+        if normalitzar_text(valor) == "pendent":
+            valor = "Pendent"
+
+        valors_nets.append(valor)
+
+    # Treure duplicats mantenint l'ordre
+    valors_unics = []
+    vistos = set()
+
+    for valor in valors_nets:
+        clau = normalitzar_text(valor)
+        if clau not in vistos:
+            valors_unics.append(valor)
+            vistos.add(clau)
+
+    # Si tots són pendent, retornar només un pendent
+    if len(valors_unics) > 0 and all(normalitzar_text(v) == "pendent" for v in valors_unics):
+        return ["Pendent"]
+
+    return valors_unics
 
 
 def primer_valor_o_pendent(df, columna):
@@ -110,8 +151,8 @@ def fila_no_buida(df):
 
 def trobar_col_resultat_final_porra(df_porra):
     # Al full Porra hi ha "Resultat final" com a predicció.
-    # Més endavant també pot existir "Resultat Final" com a columna de punts.
-    # Per això prioritzem exactament "Resultat final".
+    # També pot existir "Resultat Final" com a columna de punts.
+    # Per això prioritza exactament "Resultat final".
     for col in df_porra.columns:
         if col.strip() == "Resultat final":
             return col
@@ -136,6 +177,7 @@ def crear_ranking_des_de_porra(df_porra):
         st.stop()
 
     df = df_porra[["Participants", "Total Punts"]].copy()
+
     df = df.rename(columns={
         "Participants": "Participant",
         "Total Punts": "Punts"
@@ -225,6 +267,32 @@ def mostrar_grafic_punts(df, color="#0b70c9", altura_minima=950):
     )
 
     st.altair_chart(chart, use_container_width=True)
+
+
+def obtenir_pichichi_real(df_resultats_display, col_pichichi, col_gols):
+    if col_pichichi not in df_resultats_display.columns or col_gols not in df_resultats_display.columns:
+        return "Pendent", "Pendent"
+
+    taula = df_resultats_display[[col_pichichi, col_gols]].copy()
+
+    taula[col_pichichi] = taula[col_pichichi].astype(str).str.strip()
+    taula[col_gols] = pd.to_numeric(taula[col_gols], errors="coerce")
+
+    taula = taula[
+        (taula[col_pichichi] != "") &
+        (~taula[col_pichichi].str.lower().isin(["nan", "nat", "pendent"])) &
+        (taula[col_gols] >= 1)
+    ]
+
+    if taula.empty:
+        return "Pendent", "Pendent"
+
+    taula = taula.sort_values(col_gols, ascending=False).reset_index(drop=True)
+
+    jugador = taula.iloc[0][col_pichichi]
+    gols = int(taula.iloc[0][col_gols])
+
+    return jugador, str(gols)
 
 
 # --------------------------------------------------
@@ -336,8 +404,14 @@ st.markdown(
 # --------------------------------------------------
 # CARREGAR DADES
 # --------------------------------------------------
-df_porra, df_resultats = carregar_dades(EXCEL_FILE)
+excel_mtime = os.path.getmtime(EXCEL_FILE) if os.path.exists(EXCEL_FILE) else 0
+data_actualitzacio = obtenir_data_actualitzacio_fitxer(EXCEL_FILE)
+
+df_porra, df_resultats = carregar_dades(EXCEL_FILE, excel_mtime)
 df_ranking = crear_ranking_des_de_porra(df_porra)
+
+num_participants = len(df_ranking)
+premi_guanyador = num_participants * PREU_PARTICIPACIO
 
 
 # --------------------------------------------------
@@ -351,6 +425,44 @@ st.markdown(
 
 
 # --------------------------------------------------
+# INFO PRINCIPAL
+# --------------------------------------------------
+info1, info2, info3 = st.columns(3)
+
+info1.markdown(
+    f"""
+    <div class='card darkcard'>
+        <h3>🕒 Dades actualitzades</h3>
+        <h1 style='font-size:28px'>{data_actualitzacio}</h1>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+info2.markdown(
+    f"""
+    <div class='card greencard'>
+        <h3>🎁 Premi guanyador</h3>
+        <h1 style='font-size:36px'>{premi_guanyador} €</h1>
+        <p>{num_participants} participants x {PREU_PARTICIPACIO} €</p>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+info3.markdown(
+    f"""
+    <div class='card bluecard'>
+        <h3>👥 Participants</h3>
+        <h1 style='font-size:36px'>{num_participants}</h1>
+        <p>porres registrades</p>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+
+# --------------------------------------------------
 # TOP 3 GENERAL
 # --------------------------------------------------
 st.subheader("🥇 TOP 3 General")
@@ -359,11 +471,20 @@ top3 = df_ranking.head(3)
 
 c1, c2, c3 = st.columns(3)
 
+nom1 = top3.iloc[0]["Participant"]
+punts1 = float(top3.iloc[0]["Punts"])
+
+nom2 = top3.iloc[1]["Participant"]
+punts2 = float(top3.iloc[1]["Punts"])
+
+nom3 = top3.iloc[2]["Participant"]
+punts3 = float(top3.iloc[2]["Punts"])
+
 c1.markdown(
     f"""
     <div class='card gold'>
-        <h3>🥇 {top3.iloc[0]["Participant"]}</h3>
-        <h1>{float(top3.iloc[0]["Punts"]):.1f}</h1>
+        <h3>🥇 {nom1}</h3>
+        <h1>{punts1:.1f}</h1>
         <p>punts</p>
     </div>
     """,
@@ -373,8 +494,8 @@ c1.markdown(
 c2.markdown(
     f"""
     <div class='card silver'>
-        <h3>🥈 {top3.iloc[1]["Participant"]}</h3>
-        <h1>{float(top3.iloc[1]["Punts"]):.1f}</h1>
+        <h3>🥈 {nom2}</h3>
+        <h1>{punts2:.1f}</h1>
         <p>punts</p>
     </div>
     """,
@@ -384,8 +505,8 @@ c2.markdown(
 c3.markdown(
     f"""
     <div class='card bronze'>
-        <h3>🥉 {top3.iloc[2]["Participant"]}</h3>
-        <h1>{float(top3.iloc[2]["Punts"]):.1f}</h1>
+        <h3>🥉 {nom3}</h3>
+        <h1>{punts3:.1f}</h1>
         <p>punts</p>
     </div>
     """,
@@ -550,18 +671,12 @@ COL_GOLS = "Gols"
 campio_real = primer_valor_o_pendent(df_resultats_display, COL_CAMPIO)
 mvp_real = primer_valor_o_pendent(df_resultats_display, COL_MVP)
 resultat_final_real = primer_valor_o_pendent(df_resultats_display, COL_RESULTAT_FINAL)
-pichichi_real = primer_valor_o_pendent(df_resultats_display, COL_PICHICHI)
 
-if COL_GOLS in df_resultats_display.columns:
-    gols_series = pd.to_numeric(df_resultats_display[COL_GOLS], errors="coerce")
-    gols_valids = gols_series.dropna()
-
-    if len(gols_valids) > 0:
-        gols_pichichi = str(int(gols_valids.iloc[0]))
-    else:
-        gols_pichichi = "Pendent"
-else:
-    gols_pichichi = "Pendent"
+pichichi_real, gols_pichichi = obtenir_pichichi_real(
+    df_resultats_display,
+    COL_PICHICHI,
+    COL_GOLS
+)
 
 st.write("### 🏟️ Resum oficial")
 
@@ -592,7 +707,7 @@ r3.markdown(
     <div class='card bronze'>
         <h3>⚽ Pichichi</h3>
         <h1 style='font-size:25px'>{pichichi_real}</h1>
-        <p>{gols_pichichi} gols</p>
+        <p>{gols_pichichi if gols_pichichi != "Pendent" else "Pendent"} gols</p>
     </div>
     """,
     unsafe_allow_html=True
@@ -657,6 +772,8 @@ for fase in fases_eliminatoria:
 
         if len(valors) == 0:
             detall = "Pendent"
+        elif len(valors) == 1 and normalitzar_text(valors[0]) == "pendent":
+            detall = "Pendent"
         else:
             detall = " · ".join(valors)
 
@@ -682,28 +799,30 @@ else:
 # --------------------------------------------------
 st.write("### ⚽ Jugador pichichi")
 
-cols_pichichi = []
+if COL_PICHICHI in df_resultats_display.columns and COL_GOLS in df_resultats_display.columns:
+    taula_pichichi = df_resultats_display[[COL_PICHICHI, COL_GOLS]].copy()
 
-if COL_PICHICHI in df_resultats_display.columns:
-    cols_pichichi.append(COL_PICHICHI)
+    taula_pichichi[COL_PICHICHI] = taula_pichichi[COL_PICHICHI].astype(str).str.strip()
+    taula_pichichi[COL_GOLS] = pd.to_numeric(
+        taula_pichichi[COL_GOLS],
+        errors="coerce"
+    )
 
-if COL_GOLS in df_resultats_display.columns:
-    cols_pichichi.append(COL_GOLS)
+    # Només mostrar jugadors amb mínim 1 gol
+    taula_pichichi = taula_pichichi[
+        (taula_pichichi[COL_PICHICHI] != "") &
+        (~taula_pichichi[COL_PICHICHI].str.lower().isin(["nan", "nat", "pendent"])) &
+        (taula_pichichi[COL_GOLS] >= 1)
+    ]
 
-if len(cols_pichichi) > 0:
-    taula_pichichi = df_resultats_display[cols_pichichi].copy()
-    taula_pichichi = taula_pichichi[fila_no_buida(taula_pichichi)]
-
-    if COL_PICHICHI in taula_pichichi.columns:
-        taula_pichichi = taula_pichichi[
-            taula_pichichi[COL_PICHICHI].astype(str).str.strip() != ""
-        ]
-
-    if COL_GOLS in taula_pichichi.columns:
-        taula_pichichi[COL_GOLS] = pd.to_numeric(
-            taula_pichichi[COL_GOLS],
-            errors="coerce"
-        ).astype("Int64")
+    if taula_pichichi.empty:
+        taula_pichichi = pd.DataFrame({
+            COL_PICHICHI: ["Pendent"],
+            COL_GOLS: ["Pendent"]
+        })
+    else:
+        taula_pichichi = taula_pichichi.sort_values(COL_GOLS, ascending=False)
+        taula_pichichi[COL_GOLS] = taula_pichichi[COL_GOLS].astype("Int64")
 
     st.dataframe(
         taula_pichichi,
@@ -711,7 +830,16 @@ if len(cols_pichichi) > 0:
         hide_index=True
     )
 else:
-    st.info("No hi ha dades de pichichi configurades.")
+    taula_pichichi = pd.DataFrame({
+        "Jugador Pichichi": ["Pendent"],
+        "Gols": ["Pendent"]
+    })
+
+    st.dataframe(
+        taula_pichichi,
+        use_container_width=True,
+        hide_index=True
+    )
 
 
 # --------------------------------------------------
