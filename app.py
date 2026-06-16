@@ -69,13 +69,16 @@ FLAGS = {
     "bosnia i hercegovina": "🇧🇦",
     "paraguai": "🇵🇾",
     "tunisia": "🇹🇳",
-    "tunisía": "🇹🇳",
+    "tunísia": "🇹🇳",
     "cap verd": "🇨🇻",
     "jordania": "🇯🇴",
+    "jordània": "🇯🇴",
     "panama": "🇵🇦",
+    "panamà": "🇵🇦",
     "curaçao": "🇨🇼",
     "curacao": "🇨🇼",
     "haiti": "🇭🇹",
+    "haití": "🇭🇹",
     "sud-africa": "🇿🇦",
     "sud-àfrica": "🇿🇦"
 }
@@ -118,6 +121,18 @@ def normalitzar_text(text):
     text = unicodedata.normalize("NFD", text)
     text = "".join(char for char in text if unicodedata.category(char) != "Mn")
     return text
+
+
+def obtenir_columna_departament(df):
+    for col in df.columns:
+        if normalitzar_text(col) == "departament":
+            return col
+
+    for col in df.columns:
+        if "depart" in normalitzar_text(col):
+            return col
+
+    return None
 
 
 def afegir_bandera(valor):
@@ -239,6 +254,20 @@ def trobar_col_resultat_final_porra(df_porra):
     return None
 
 
+def recalcular_posicions(df):
+    df = df.copy()
+    df = df.sort_values("Punts", ascending=False).reset_index(drop=True)
+    df["Posició"] = df.index + 1
+
+    if not df.empty:
+        punts_lider = float(df["Punts"].iloc[0])
+        df["Dif líder"] = (df["Punts"] - punts_lider).round(1)
+    else:
+        df["Dif líder"] = 0
+
+    return df
+
+
 def crear_ranking_des_de_porra(df_porra):
     if "Participants" not in df_porra.columns:
         st.error("No s'ha trobat la columna 'Participants' al full Porra.")
@@ -250,29 +279,99 @@ def crear_ranking_des_de_porra(df_porra):
         st.write("Columnes detectades:", list(df_porra.columns))
         st.stop()
 
-    df = df_porra[["Participants", "Total Punts"]].copy()
+    col_dep = obtenir_columna_departament(df_porra)
 
-    df = df.rename(columns={
+    cols_base = ["Participants", "Total Punts"]
+    if col_dep is not None:
+        cols_base.append(col_dep)
+
+    df = df_porra[cols_base].copy()
+
+    rename_map = {
         "Participants": "Participant",
         "Total Punts": "Punts"
-    })
+    }
+
+    if col_dep is not None:
+        rename_map[col_dep] = "Departament"
+
+    df = df.rename(columns=rename_map)
 
     df["Participant"] = df["Participant"].astype(str).str.strip()
     df["Punts"] = pd.to_numeric(df["Punts"], errors="coerce")
+
+    if "Departament" in df.columns:
+        df["Departament"] = df["Departament"].fillna("Sense departament").astype(str).str.strip()
+        df["Departament"] = df["Departament"].replace("", "Sense departament")
 
     df = df.dropna(subset=["Punts"])
     df = df[df["Participant"] != ""]
     df = df[~df["Participant"].str.contains("Total", case=False, na=False)]
 
-    df = df.sort_values("Punts", ascending=False).reset_index(drop=True)
     df["Punts"] = df["Punts"].round(1)
 
-    df["Posició"] = df.index + 1
-
-    punts_lider = float(df["Punts"].iloc[0])
-    df["Dif líder"] = (df["Punts"] - punts_lider).round(1)
+    df = recalcular_posicions(df)
 
     return df
+
+
+def crear_ranking_departaments(df_ranking):
+    if "Departament" not in df_ranking.columns:
+        return pd.DataFrame()
+
+    df_temp = df_ranking.copy()
+    df_temp["Departament"] = df_temp["Departament"].fillna("Sense departament").astype(str).str.strip()
+
+    resum = (
+        df_temp
+        .groupby("Departament", as_index=False)
+        .agg(
+            Participants=("Participant", "count"),
+            Punts_totals=("Punts", "sum"),
+            Mitjana_punts=("Punts", "mean"),
+            Millor_puntuacio=("Punts", "max")
+        )
+    )
+
+    lider_departament = (
+        df_temp
+        .sort_values("Punts", ascending=False)
+        .drop_duplicates("Departament")
+        [["Departament", "Participant"]]
+        .rename(columns={"Participant": "Líder departament"})
+    )
+
+    resum = resum.merge(lider_departament, on="Departament", how="left")
+
+    resum["Punts_totals"] = resum["Punts_totals"].round(1)
+    resum["Mitjana_punts"] = resum["Mitjana_punts"].round(1)
+    resum["Millor_puntuacio"] = resum["Millor_puntuacio"].round(1)
+
+    resum = resum.sort_values(
+        ["Mitjana_punts", "Punts_totals"],
+        ascending=[False, False]
+    ).reset_index(drop=True)
+
+    resum["Posició"] = resum.index + 1
+
+    if not resum.empty:
+        lider = float(resum["Mitjana_punts"].iloc[0])
+        resum["Dif líder"] = (resum["Mitjana_punts"] - lider).round(1)
+    else:
+        resum["Dif líder"] = 0
+
+    return resum[
+        [
+            "Posició",
+            "Departament",
+            "Participants",
+            "Mitjana_punts",
+            "Punts_totals",
+            "Millor_puntuacio",
+            "Líder departament",
+            "Dif líder"
+        ]
+    ]
 
 
 def highlight_leader(row):
@@ -282,7 +381,14 @@ def highlight_leader(row):
 
 
 def mostrar_taula_ranking(df):
-    df_display = df[["Posició", "Participant", "Punts", "Dif líder"]].copy()
+    cols = ["Posició", "Participant"]
+
+    if "Departament" in df.columns:
+        cols.append("Departament")
+
+    cols += ["Punts", "Dif líder"]
+
+    df_display = df[cols].copy()
 
     df_display["Punts"] = df_display["Punts"].astype(float).round(1)
     df_display["Dif líder"] = df_display["Dif líder"].astype(float).round(1)
@@ -304,6 +410,38 @@ def mostrar_taula_ranking(df):
         column_config={
             "Posició": st.column_config.NumberColumn("Posició", format="%d"),
             "Punts": st.column_config.NumberColumn("Punts", format="%.1f"),
+            "Dif líder": st.column_config.NumberColumn("Dif líder", format="%.1f"),
+        }
+    )
+
+
+def mostrar_taula_departaments(df_dep):
+    if df_dep.empty:
+        st.info("Afegeix una columna 'Departament' al costat de 'Participants' al full Porra per activar aquest mode.")
+        return
+
+    styled = (
+        df_dep
+        .style
+        .apply(highlight_leader, axis=1)
+        .format({
+            "Mitjana_punts": "{:.1f}",
+            "Punts_totals": "{:.1f}",
+            "Millor_puntuacio": "{:.1f}",
+            "Dif líder": "{:.1f}"
+        })
+    )
+
+    st.dataframe(
+        styled,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Posició": st.column_config.NumberColumn("Posició", format="%d"),
+            "Participants": st.column_config.NumberColumn("Participants", format="%d"),
+            "Mitjana_punts": st.column_config.NumberColumn("Mitjana punts", format="%.1f"),
+            "Punts_totals": st.column_config.NumberColumn("Punts totals", format="%.1f"),
+            "Millor_puntuacio": st.column_config.NumberColumn("Millor puntuació", format="%.1f"),
             "Dif líder": st.column_config.NumberColumn("Dif líder", format="%.1f"),
         }
     )
@@ -335,6 +473,43 @@ def mostrar_grafic_punts(df, color="#0b70c9", altura_minima=950):
                 alt.Tooltip("Participant:N", title="Participant"),
                 alt.Tooltip("Punts:Q", title="Punts", format=".1f"),
                 alt.Tooltip("Dif líder:Q", title="Dif. líder", format=".1f")
+            ]
+        )
+        .properties(height=chart_height)
+    )
+
+    st.altair_chart(chart, use_container_width=True)
+
+
+def mostrar_grafic_departaments(df_dep):
+    if df_dep.empty:
+        return
+
+    chart_data = df_dep.copy().sort_values("Mitjana_punts", ascending=False)
+    chart_height = max(350, len(chart_data) * 46)
+
+    chart = (
+        alt.Chart(chart_data)
+        .mark_bar(color="#0f9d58")
+        .encode(
+            x=alt.X(
+                "Mitjana_punts:Q",
+                title="Mitjana de punts",
+                scale=alt.Scale(zero=False)
+            ),
+            y=alt.Y(
+                "Departament:N",
+                sort="-x",
+                title=None,
+                axis=alt.Axis(labelLimit=560, labelFontSize=13)
+            ),
+            tooltip=[
+                alt.Tooltip("Posició:Q", title="Posició"),
+                alt.Tooltip("Departament:N", title="Departament"),
+                alt.Tooltip("Participants:Q", title="Participants"),
+                alt.Tooltip("Mitjana_punts:Q", title="Mitjana punts", format=".1f"),
+                alt.Tooltip("Punts_totals:Q", title="Punts totals", format=".1f"),
+                alt.Tooltip("Líder departament:N", title="Líder departament")
             ]
         )
         .properties(height=chart_height)
@@ -534,6 +709,11 @@ st.markdown(
         color: white;
     }}
 
+    .purplecard {{
+        background: linear-gradient(135deg, #6f42c1, #b982ff);
+        color: white;
+    }}
+
     .card h3 {{
         margin: 0px 0px 14px 0px;
         font-size: clamp(15px, 2vw, 24px);
@@ -602,9 +782,12 @@ data_actualitzacio = obtenir_data_actualitzacio_fitxer(EXCEL_FILE)
 
 df_porra, df_resultats = carregar_dades(EXCEL_FILE, excel_mtime)
 df_ranking = crear_ranking_des_de_porra(df_porra)
+df_departaments = crear_ranking_departaments(df_ranking)
 
 num_participants = len(df_ranking)
 premi_guanyador = num_participants * PREU_PARTICIPACIO
+
+te_departaments = "Departament" in df_ranking.columns and not df_departaments.empty
 
 
 # --------------------------------------------------
@@ -612,7 +795,7 @@ premi_guanyador = num_participants * PREU_PARTICIPACIO
 # --------------------------------------------------
 st.markdown('<p class="title">🏆 PORRA MUNDIAL</p>', unsafe_allow_html=True)
 st.markdown(
-    '<p class="subtitle">Classificació en viu, detall per participant, lliguetes personalitzades i resultats reals</p>',
+    '<p class="subtitle">Classificació en viu, competició per departaments, lliguetes personalitzades i resultats reals</p>',
     unsafe_allow_html=True
 )
 
@@ -656,6 +839,24 @@ info3.markdown(
 
 
 # --------------------------------------------------
+# DEPARTAMENT GUANYADOR - CARD EXTRA
+# --------------------------------------------------
+if te_departaments:
+    dept_lider = df_departaments.iloc[0]
+
+    st.markdown(
+        f"""
+        <div class='card purplecard'>
+            <h3>🏢 Departament líder</h3>
+            <h1>{dept_lider["Departament"]}</h1>
+            <p>Mitjana {float(dept_lider["Mitjana_punts"]):.1f} punts · {int(dept_lider["Participants"])} participants</p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+
+# --------------------------------------------------
 # TOP 3 GENERAL
 # --------------------------------------------------
 st.subheader("🥇 TOP 3 General")
@@ -671,12 +872,16 @@ top_cards = [
 ]
 
 for col, (medalla, classe, row) in zip([c1, c2, c3], top_cards):
+    subtext = "punts"
+    if "Departament" in row.index:
+        subtext = f"{row['Departament']}"
+
     col.markdown(
         f"""
         <div class='card {classe}'>
             <h3>{medalla} {row["Participant"]}</h3>
             <h1>{float(row["Punts"]):.1f}</h1>
-            <p>punts</p>
+            <p>{subtext}</p>
         </div>
         """,
         unsafe_allow_html=True
@@ -720,6 +925,11 @@ if jugador is not None:
         c1, c2 = st.columns(2)
 
         c1.metric("Total punts", f"{total:.1f}")
+
+        col_dep_original = obtenir_columna_departament(df_porra)
+        if col_dep_original is not None:
+            departament_jugador = valor_o_pendent(df_j[col_dep_original].values[0])
+            c1.metric("Departament", departament_jugador)
 
         punts_dict = {
             "1rs grup": pd.to_numeric(df_j["Punts Grups 1r"].values[0], errors="coerce"),
@@ -777,6 +987,40 @@ else:
 
 
 # --------------------------------------------------
+# COMPETICIÓ PER DEPARTAMENTS
+# --------------------------------------------------
+st.subheader("🏢 Competició per departaments")
+
+if te_departaments:
+    st.write("Rànquing calculat per **mitjana de punts** del departament. També es mostren punts totals, millor puntuació i líder del departament.")
+
+    mostrar_taula_departaments(df_departaments)
+
+    st.write("#### 📈 Gràfic departaments")
+    mostrar_grafic_departaments(df_departaments)
+
+    departaments_opcions = ["Tots"] + sorted(df_ranking["Departament"].dropna().astype(str).unique().tolist())
+
+    departament_sel = st.selectbox(
+        "Filtra la classificació individual per departament",
+        departaments_opcions
+    )
+
+    if departament_sel != "Tots":
+        df_dep_individual = df_ranking[df_ranking["Departament"] == departament_sel].copy()
+        df_dep_individual = recalcular_posicions(df_dep_individual)
+
+        st.write(f"### Classificació individual · {departament_sel}")
+        mostrar_taula_ranking(df_dep_individual)
+
+        st.write(f"#### 📈 Gràfic · {departament_sel}")
+        mostrar_grafic_punts(df_dep_individual, color="#6f42c1", altura_minima=350)
+
+else:
+    st.info("Per activar aquest apartat, afegeix una columna 'Departament' al costat de 'Participants' al full Porra.")
+
+
+# --------------------------------------------------
 # LLIGUETES - JUST ABANS DELS RESULTATS
 # --------------------------------------------------
 st.subheader("🏟️ Lligueta personalitzada")
@@ -795,11 +1039,7 @@ if participants_filtrats:
         df_ranking["Participant"].astype(str).isin(participants_filtrats)
     ].copy()
 
-    df_lligueta = df_lligueta.sort_values("Punts", ascending=False).reset_index(drop=True)
-    df_lligueta["Posició"] = df_lligueta.index + 1
-
-    punts_lider_lligueta = float(df_lligueta["Punts"].iloc[0])
-    df_lligueta["Dif líder"] = (df_lligueta["Punts"] - punts_lider_lligueta).round(1)
+    df_lligueta = recalcular_posicions(df_lligueta)
 
     st.write(f"Participants seleccionats: **{len(participants_filtrats)}**")
 
