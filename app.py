@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 import altair as alt
+import base64
+import os
 
 st.set_page_config(
     page_title="Porra Mundial",
@@ -11,16 +13,161 @@ st.set_page_config(
 # CONFIGURACIÓ
 # --------------------------------------------------
 EXCEL_FILE = "Porra_Mundial_Final_Definitiva.xlsx"
+BACKGROUND_IMAGE = "fifa-Trionda.jpg"
+
+# --------------------------------------------------
+# FUNCIÓ IMATGE DE FONS
+# --------------------------------------------------
+def get_base64_image(image_path):
+    with open(image_path, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode()
+
+# --------------------------------------------------
+# ESTILS + FONS
+# --------------------------------------------------
+if os.path.exists(BACKGROUND_IMAGE):
+    img_base64 = get_base64_image(BACKGROUND_IMAGE)
+
+    st.markdown(
+        f"""
+        <style>
+        .stApp {{
+            background-image:
+                linear-gradient(rgba(0,0,0,0.58), rgba(0,0,0,0.70)),
+                url("data:image/jpg;base64,{img_base64}");
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+        }}
+
+        .block-container {{
+            padding-top: 2rem;
+            padding-bottom: 2rem;
+            background: rgba(255,255,255,0.88);
+            border-radius: 20px;
+            margin-top: 20px;
+            margin-bottom: 20px;
+        }}
+
+        .title {{
+            font-size: 48px;
+            font-weight: 900;
+            margin-bottom: 0px;
+            color: #102a43;
+        }}
+
+        .subtitle {{
+            font-size: 18px;
+            color: #334e68;
+            margin-top: 0px;
+            margin-bottom: 25px;
+        }}
+
+        .card {{
+            padding: 22px;
+            border-radius: 18px;
+            text-align: center;
+            box-shadow: 0px 4px 20px rgba(0,0,0,0.18);
+            min-height: 150px;
+        }}
+
+        .gold {{
+            background: linear-gradient(135deg, #ffd700, #fff1a8);
+            color: #111;
+        }}
+
+        .silver {{
+            background: linear-gradient(135deg, #c0c0c0, #f2f2f2);
+            color: #111;
+        }}
+
+        .bronze {{
+            background: linear-gradient(135deg, #cd7f32, #f0b27a);
+            color: white;
+        }}
+
+        .card h3 {{
+            margin-bottom: 10px;
+        }}
+
+        .card h1 {{
+            margin: 0px;
+            font-size: 42px;
+        }}
+
+        .small-note {{
+            font-size: 13px;
+            color: #777;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+else:
+    st.markdown(
+        """
+        <style>
+        .title {
+            font-size: 48px;
+            font-weight: 900;
+            margin-bottom: 0px;
+            color: #102a43;
+        }
+
+        .subtitle {
+            font-size: 18px;
+            color: #334e68;
+            margin-top: 0px;
+            margin-bottom: 25px;
+        }
+
+        .card {
+            padding: 22px;
+            border-radius: 18px;
+            text-align: center;
+            box-shadow: 0px 4px 20px rgba(0,0,0,0.18);
+            min-height: 150px;
+        }
+
+        .gold {
+            background: linear-gradient(135deg, #ffd700, #fff1a8);
+            color: #111;
+        }
+
+        .silver {
+            background: linear-gradient(135deg, #c0c0c0, #f2f2f2);
+            color: #111;
+        }
+
+        .bronze {
+            background: linear-gradient(135deg, #cd7f32, #f0b27a);
+            color: white;
+        }
+
+        .card h3 {
+            margin-bottom: 10px;
+        }
+
+        .card h1 {
+            margin: 0px;
+            font-size: 42px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
 
 # --------------------------------------------------
 # LOAD DATA
 # --------------------------------------------------
 df_ranking = pd.read_excel(EXCEL_FILE, sheet_name="Gràfics")
 df_porra = pd.read_excel(EXCEL_FILE, sheet_name="Porra")
+df_resultats = pd.read_excel(EXCEL_FILE, sheet_name="Resultats Reals")
 
 # Netejar noms de columnes
 df_ranking.columns = df_ranking.columns.astype(str).str.strip()
 df_porra.columns = df_porra.columns.astype(str).str.strip()
+df_resultats.columns = df_resultats.columns.astype(str).str.strip()
 
 # --------------------------------------------------
 # DETECTAR COLUMNES DEL RÀNQUING
@@ -64,71 +211,17 @@ df_ranking = df_ranking.dropna(subset=[col_punts])
 # Ordenar general
 df_ranking = df_ranking.sort_values(col_punts, ascending=False).reset_index(drop=True)
 
-# Posició general
-df_ranking["Posició general"] = df_ranking.index + 1
-
 # Arrodonir punts a 1 decimal
 df_ranking[col_punts] = df_ranking[col_punts].round(1)
 
 # --------------------------------------------------
-# ESTILS
+# TÍTOL
 # --------------------------------------------------
-st.markdown("""
-<style>
-.title {
-    font-size: 44px;
-    font-weight: 800;
-    margin-bottom: 0px;
-}
-
-.subtitle {
-    font-size: 18px;
-    color: #666;
-    margin-top: 0px;
-    margin-bottom: 25px;
-}
-
-.card {
-    padding: 22px;
-    border-radius: 18px;
-    text-align: center;
-    box-shadow: 0px 4px 20px rgba(0,0,0,0.08);
-    min-height: 150px;
-}
-
-.gold {
-    background: linear-gradient(135deg, #ffd700, #fff1a8);
-    color: #111;
-}
-
-.silver {
-    background: linear-gradient(135deg, #c0c0c0, #f2f2f2);
-    color: #111;
-}
-
-.bronze {
-    background: linear-gradient(135deg, #cd7f32, #f0b27a);
-    color: white;
-}
-
-.card h3 {
-    margin-bottom: 10px;
-}
-
-.card h1 {
-    margin: 0px;
-    font-size: 42px;
-}
-
-.small-note {
-    font-size: 13px;
-    color: #777;
-}
-</style>
-""", unsafe_allow_html=True)
-
 st.markdown('<p class="title">🏆 PORRA MUNDIAL</p>', unsafe_allow_html=True)
-st.markdown('<p class="subtitle">Classificació en viu i lliguetes personalitzades</p>', unsafe_allow_html=True)
+st.markdown(
+    '<p class="subtitle">Classificació en viu, lliguetes personalitzades i resultats reals</p>',
+    unsafe_allow_html=True
+)
 
 # --------------------------------------------------
 # FILTRE PARTICIPANTS
@@ -228,7 +321,7 @@ elif len(df_view) > 0:
 st.subheader("📊 Classificació")
 
 ranking_display = df_view[
-    ["Posició", "Posició general", col_participant_ranking, col_punts, "Dif líder"]
+    ["Posició", col_participant_ranking, col_punts, "Dif líder"]
 ].copy()
 
 ranking_display = ranking_display.rename(columns={
@@ -260,7 +353,6 @@ st.dataframe(
     hide_index=True,
     column_config={
         "Posició": st.column_config.NumberColumn("Posició", format="%d"),
-        "Posició general": st.column_config.NumberColumn("Posició general", format="%d"),
         "Punts": st.column_config.NumberColumn("Punts", format="%.1f"),
         "Dif líder": st.column_config.NumberColumn("Dif líder", format="%.1f"),
     }
@@ -292,7 +384,6 @@ chart = (
         ),
         tooltip=[
             alt.Tooltip("Posició:Q", title="Posició"),
-            alt.Tooltip("Posició general:Q", title="Posició general"),
             alt.Tooltip("Participant:N", title="Participant"),
             alt.Tooltip("Punts:Q", title="Punts", format=".1f"),
             alt.Tooltip("Dif líder:Q", title="Dif. líder", format=".1f")
@@ -380,13 +471,34 @@ if participants_filtrats:
         hide_index=True,
         column_config={
             "Posició": st.column_config.NumberColumn("Posició", format="%d"),
-            "Posició general": st.column_config.NumberColumn("Posició general", format="%d"),
             "Punts": st.column_config.NumberColumn("Punts", format="%.1f"),
             "Dif líder": st.column_config.NumberColumn("Dif líder", format="%.1f"),
         }
     )
 else:
     st.write("Selecciona participants al filtre superior per crear una lligueta personalitzada.")
+
+# --------------------------------------------------
+# RESULTATS REALS
+# --------------------------------------------------
+st.subheader("✅ Resultats reals")
+
+df_resultats_display = df_resultats.copy()
+
+# Treure files totalment buides
+df_resultats_display = df_resultats_display.dropna(how="all")
+
+# Treure columnes totalment buides
+df_resultats_display = df_resultats_display.dropna(axis=1, how="all")
+
+# Omplir buits per visualitzar millor
+df_resultats_display = df_resultats_display.fillna("")
+
+st.dataframe(
+    df_resultats_display,
+    use_container_width=True,
+    hide_index=True
+)
 
 # --------------------------------------------------
 # FOOTER
