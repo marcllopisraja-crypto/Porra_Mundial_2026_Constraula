@@ -41,27 +41,73 @@ def trobar_columna(df, paraules_clau):
     return None
 
 
-def trobar_columnes(df, paraules_clau):
-    columnes = []
-    for col in df.columns:
-        col_norm = normalitzar_text(col)
-        for paraula in paraules_clau:
-            if normalitzar_text(paraula) in col_norm:
-                columnes.append(col)
-                break
-    return columnes
-
-
 def valor_o_pendent(valor):
     if pd.isna(valor):
         return "Pendent"
 
     valor_text = str(valor).strip()
 
-    if valor_text == "" or valor_text.lower() == "nan":
+    if valor_text == "" or valor_text.lower() in ["nan", "nat"]:
         return "Pendent"
 
     return valor_text
+
+
+def llista_valors_no_buits(df, columna):
+    if columna not in df.columns:
+        return []
+
+    valors = (
+        df[columna]
+        .astype(str)
+        .str.strip()
+        .replace("nan", "")
+        .replace("NaT", "")
+    )
+
+    valors = [v for v in valors if v != ""]
+    return valors
+
+
+def primer_valor_o_pendent(df, columna):
+    valors = llista_valors_no_buits(df, columna)
+    if len(valors) == 0:
+        return "Pendent"
+    return valors[0]
+
+
+def preparar_taula_buida(df):
+    df = df.copy()
+    df = df.dropna(how="all")
+    df = df.dropna(axis=1, how="all")
+    df = df.fillna("")
+    return df
+
+
+def fila_no_buida(df):
+    return (
+        df.astype(str)
+        .apply(lambda fila: "".join(fila), axis=1)
+        .str.strip() != ""
+    )
+
+
+def trobar_col_resultat_final_porra(df_porra):
+    # Preferim la predicció "Resultat final", no la columna de punts/score final.
+    for col in df_porra.columns:
+        if col.strip() == "Resultat final":
+            return col
+
+    possibles = []
+    for col in df_porra.columns:
+        col_norm = normalitzar_text(col)
+        if "resultat" in col_norm and "final" in col_norm and "punt" not in col_norm:
+            possibles.append(col)
+
+    if len(possibles) > 0:
+        return possibles[0]
+
+    return None
 
 
 # --------------------------------------------------
@@ -75,7 +121,7 @@ if os.path.exists(BACKGROUND_IMAGE):
         <style>
         .stApp {{
             background-image:
-                linear-gradient(rgba(0,0,0,0.58), rgba(0,0,0,0.72)),
+                linear-gradient(rgba(0,0,0,0.58), rgba(0,0,0,0.74)),
                 url("data:image/jpg;base64,{img_base64}");
             background-size: cover;
             background-position: center;
@@ -85,17 +131,19 @@ if os.path.exists(BACKGROUND_IMAGE):
         .block-container {{
             padding-top: 2rem;
             padding-bottom: 2rem;
-            background: rgba(255,255,255,0.90);
-            border-radius: 22px;
-            margin-top: 20px;
-            margin-bottom: 20px;
+            background: rgba(255,255,255,0.91);
+            border-radius: 24px;
+            margin-top: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0px 8px 30px rgba(0,0,0,0.25);
         }}
 
         .title {{
-            font-size: 50px;
+            font-size: 52px;
             font-weight: 900;
             margin-bottom: 0px;
             color: #102a43;
+            letter-spacing: -1px;
         }}
 
         .subtitle {{
@@ -128,6 +176,21 @@ if os.path.exists(BACKGROUND_IMAGE):
             color: white;
         }}
 
+        .bluecard {{
+            background: linear-gradient(135deg, #0b70c9, #7cc5ff);
+            color: white;
+        }}
+
+        .greencard {{
+            background: linear-gradient(135deg, #0f9d58, #8ee6b3);
+            color: white;
+        }}
+
+        .darkcard {{
+            background: linear-gradient(135deg, #102a43, #486581);
+            color: white;
+        }}
+
         .card h3 {{
             margin-bottom: 10px;
         }}
@@ -136,19 +199,25 @@ if os.path.exists(BACKGROUND_IMAGE):
             margin: 0px;
             font-size: 42px;
         }}
+
+        .card p {{
+            margin: 5px 0px 0px 0px;
+        }}
         </style>
         """,
         unsafe_allow_html=True
     )
+
 else:
     st.markdown(
         """
         <style>
         .title {
-            font-size: 50px;
+            font-size: 52px;
             font-weight: 900;
             margin-bottom: 0px;
             color: #102a43;
+            letter-spacing: -1px;
         }
 
         .subtitle {
@@ -178,6 +247,21 @@ else:
 
         .bronze {
             background: linear-gradient(135deg, #cd7f32, #f0b27a);
+            color: white;
+        }
+
+        .bluecard {
+            background: linear-gradient(135deg, #0b70c9, #7cc5ff);
+            color: white;
+        }
+
+        .greencard {
+            background: linear-gradient(135deg, #0f9d58, #8ee6b3);
+            color: white;
+        }
+
+        .darkcard {
+            background: linear-gradient(135deg, #102a43, #486581);
             color: white;
         }
 
@@ -239,112 +323,79 @@ df_ranking = df_ranking.dropna(subset=[col_punts])
 df_ranking = df_ranking.sort_values(col_punts, ascending=False).reset_index(drop=True)
 df_ranking[col_punts] = df_ranking[col_punts].round(1)
 
+df_ranking["Posició"] = df_ranking.index + 1
+punts_lider_general = float(df_ranking[col_punts].iloc[0])
+df_ranking["Dif líder"] = (df_ranking[col_punts] - punts_lider_general).round(1)
+
 
 # --------------------------------------------------
 # TÍTOL
 # --------------------------------------------------
 st.markdown('<p class="title">🏆 PORRA MUNDIAL</p>', unsafe_allow_html=True)
 st.markdown(
-    '<p class="subtitle">Classificació en viu, lliguetes personalitzades i resultats reals</p>',
+    '<p class="subtitle">Classificació en viu, detall per participant, lliguetes personalitzades i resultats reals</p>',
     unsafe_allow_html=True
 )
 
 
 # --------------------------------------------------
-# FILTRE PARTICIPANTS
+# TOP 3 GENERAL
 # --------------------------------------------------
-st.subheader("🎛️ Filtre de participants")
+st.subheader("🥇 TOP 3 General")
 
-tots_participants = df_ranking[col_participant_ranking].dropna().astype(str).tolist()
+top3 = df_ranking.head(3)
 
-participants_filtrats = st.multiselect(
-    "Selecciona participants per crear una lligueta o deixa-ho buit per veure la classificació completa:",
-    options=tots_participants,
-    default=[]
+c1, c2, c3 = st.columns(3)
+
+nom1 = top3.iloc[0][col_participant_ranking]
+punts1 = float(top3.iloc[0][col_punts])
+
+nom2 = top3.iloc[1][col_participant_ranking]
+punts2 = float(top3.iloc[1][col_punts])
+
+nom3 = top3.iloc[2][col_participant_ranking]
+punts3 = float(top3.iloc[2][col_punts])
+
+c1.markdown(
+    f"""
+    <div class='card gold'>
+        <h3>🥇 {nom1}</h3>
+        <h1>{punts1:.1f}</h1>
+        <p>punts</p>
+    </div>
+    """,
+    unsafe_allow_html=True
 )
 
-if participants_filtrats:
-    df_view = df_ranking[
-        df_ranking[col_participant_ranking].astype(str).isin(participants_filtrats)
-    ].copy()
-else:
-    df_view = df_ranking.copy()
+c2.markdown(
+    f"""
+    <div class='card silver'>
+        <h3>🥈 {nom2}</h3>
+        <h1>{punts2:.1f}</h1>
+        <p>punts</p>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
-df_view = df_view.sort_values(col_punts, ascending=False).reset_index(drop=True)
-df_view["Posició"] = df_view.index + 1
-
-if len(df_view) > 0:
-    punts_lider = float(df_view[col_punts].iloc[0])
-    df_view["Dif líder"] = (df_view[col_punts] - punts_lider).round(1)
-else:
-    st.warning("No hi ha participants seleccionats.")
-    st.stop()
-
-df_view[col_punts] = df_view[col_punts].round(1)
-
-
-# --------------------------------------------------
-# TOP 3
-# --------------------------------------------------
-st.subheader("🥇 TOP 3")
-
-if len(df_view) >= 3:
-    top3 = df_view.head(3)
-
-    c1, c2, c3 = st.columns(3)
-
-    nom1 = top3.iloc[0][col_participant_ranking]
-    punts1 = float(top3.iloc[0][col_punts])
-
-    nom2 = top3.iloc[1][col_participant_ranking]
-    punts2 = float(top3.iloc[1][col_punts])
-
-    nom3 = top3.iloc[2][col_participant_ranking]
-    punts3 = float(top3.iloc[2][col_punts])
-
-    c1.markdown(
-        f"""
-        <div class='card gold'>
-            <h3>🥇 {nom1}</h3>
-            <h1>{punts1:.1f}</h1>
-            <p>punts</p>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-    c2.markdown(
-        f"""
-        <div class='card silver'>
-            <h3>🥈 {nom2}</h3>
-            <h1>{punts2:.1f}</h1>
-            <p>punts</p>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-    c3.markdown(
-        f"""
-        <div class='card bronze'>
-            <h3>🥉 {nom3}</h3>
-            <h1>{punts3:.1f}</h1>
-            <p>punts</p>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-elif len(df_view) > 0:
-    st.info("Selecciona com a mínim 3 participants si vols veure el TOP 3 complet.")
+c3.markdown(
+    f"""
+    <div class='card bronze'>
+        <h3>🥉 {nom3}</h3>
+        <h1>{punts3:.1f}</h1>
+        <p>punts</p>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
 
 # --------------------------------------------------
-# CLASSIFICACIÓ
+# CLASSIFICACIÓ GENERAL
 # --------------------------------------------------
-st.subheader("📊 Classificació")
+st.subheader("📊 Classificació general")
 
-ranking_display = df_view[
+ranking_display = df_ranking[
     ["Posició", col_participant_ranking, col_punts, "Dif líder"]
 ].copy()
 
@@ -386,15 +437,14 @@ st.dataframe(
 
 
 # --------------------------------------------------
-# GRÀFIC ORDENAT I MÉS LLARG
+# GRÀFIC GENERAL ORDENAT I ALT
 # --------------------------------------------------
-st.subheader("📈 Gràfic de punts")
+st.subheader("📈 Gràfic general de punts")
 
 chart_data = ranking_display.copy()
 chart_data = chart_data.sort_values("Punts", ascending=False)
 
-# Més alt perquè es vegin tots els noms
-chart_height = max(650, len(chart_data) * 32)
+chart_height = max(950, len(chart_data) * 36)
 
 chart = (
     alt.Chart(chart_data)
@@ -409,7 +459,7 @@ chart = (
             "Participant:N",
             sort="-x",
             title=None,
-            axis=alt.Axis(labelLimit=420, labelFontSize=12)
+            axis=alt.Axis(labelLimit=520, labelFontSize=12)
         ),
         tooltip=[
             alt.Tooltip("Posició:Q", title="Posició"),
@@ -485,14 +535,7 @@ if jugador is not None:
 
         c1.altair_chart(chart_cat, use_container_width=True)
 
-        # Detectar columna de resultat final prevista
-        col_resultat_final_porra = None
-
-        for col in df_porra.columns:
-            col_norm = normalitzar_text(col)
-            if "resultat" in col_norm and "final" in col_norm and "punt" not in col_norm:
-                col_resultat_final_porra = col
-                break
+        col_resultat_final_porra = trobar_col_resultat_final_porra(df_porra)
 
         if col_resultat_final_porra is not None:
             resultat_final = valor_o_pendent(df_j[col_resultat_final_porra].values[0])
@@ -504,20 +547,62 @@ if jugador is not None:
         c2.write(f"📌 Resultat final: {resultat_final}")
         c2.write(f"⭐ MVP: {valor_o_pendent(df_j['MVP'].values[0])}")
         c2.write(f"⚽ Pichichi: {valor_o_pendent(df_j['Pichichi'].values[0])}")
+
 else:
     st.info("Selecciona un participant per veure el detall de punts i prediccions.")
 
 
 # --------------------------------------------------
-# LLIGUETA SELECCIONADA
+# LLIGUETES - JUST ABANS DELS RESULTATS
 # --------------------------------------------------
-st.subheader("🏟️ Lligueta seleccionada")
+st.subheader("🏟️ Lligueta personalitzada")
+
+tots_participants = df_ranking[col_participant_ranking].dropna().astype(str).tolist()
+
+participants_filtrats = st.multiselect(
+    "Selecciona participants per crear una lligueta:",
+    options=tots_participants,
+    default=[],
+    placeholder="Tria participants..."
+)
 
 if participants_filtrats:
+    df_lligueta = df_ranking[
+        df_ranking[col_participant_ranking].astype(str).isin(participants_filtrats)
+    ].copy()
+
+    df_lligueta = df_lligueta.sort_values(col_punts, ascending=False).reset_index(drop=True)
+    df_lligueta["Posició"] = df_lligueta.index + 1
+
+    punts_lider_lligueta = float(df_lligueta[col_punts].iloc[0])
+    df_lligueta["Dif líder"] = (df_lligueta[col_punts] - punts_lider_lligueta).round(1)
+
+    lligueta_display = df_lligueta[
+        ["Posició", col_participant_ranking, col_punts, "Dif líder"]
+    ].copy()
+
+    lligueta_display = lligueta_display.rename(columns={
+        col_participant_ranking: "Participant",
+        col_punts: "Punts"
+    })
+
+    lligueta_display["Punts"] = lligueta_display["Punts"].astype(float).round(1)
+    lligueta_display["Dif líder"] = lligueta_display["Dif líder"].astype(float).round(1)
+
     st.write(f"Participants seleccionats: **{len(participants_filtrats)}**")
 
+    styled_lligueta = (
+        lligueta_display
+        .style
+        .apply(highlight_leader, axis=1)
+        .format({
+            "Punts": "{:.1f}",
+            "Dif líder": "{:.1f}"
+        })
+    )
+
     st.dataframe(
-        styled_ranking,
+        styled_lligueta,
         use_container_width=True,
         hide_index=True,
         column_config={
@@ -526,54 +611,149 @@ if participants_filtrats:
             "Dif líder": st.column_config.NumberColumn("Dif líder", format="%.1f"),
         }
     )
+
+    st.write("#### 📈 Gràfic de la lligueta")
+
+    chart_lligueta_data = lligueta_display.sort_values("Punts", ascending=False)
+    chart_lligueta_height = max(350, len(chart_lligueta_data) * 42)
+
+    chart_lligueta = (
+        alt.Chart(chart_lligueta_data)
+        .mark_bar(color="#0f9d58")
+        .encode(
+            x=alt.X(
+                "Punts:Q",
+                title="Punts",
+                scale=alt.Scale(zero=False)
+            ),
+            y=alt.Y(
+                "Participant:N",
+                sort="-x",
+                title=None,
+                axis=alt.Axis(labelLimit=520, labelFontSize=13)
+            ),
+            tooltip=[
+                alt.Tooltip("Posició:Q", title="Posició"),
+                alt.Tooltip("Participant:N", title="Participant"),
+                alt.Tooltip("Punts:Q", title="Punts", format=".1f"),
+                alt.Tooltip("Dif líder:Q", title="Dif. líder", format=".1f")
+            ]
+        )
+        .properties(height=chart_lligueta_height)
+    )
+
+    st.altair_chart(chart_lligueta, use_container_width=True)
+
 else:
-    st.write("Selecciona participants al filtre superior per crear una lligueta personalitzada.")
+    st.write("Selecciona participants per crear una classificació reduïda tipus lligueta.")
 
 
 # --------------------------------------------------
-# RESULTATS REALS
+# RESULTATS REALS - DASHBOARD
 # --------------------------------------------------
 st.subheader("✅ Resultats reals")
 
-df_resultats_display = df_resultats.copy()
-df_resultats_display = df_resultats_display.dropna(how="all")
-df_resultats_display = df_resultats_display.dropna(axis=1, how="all")
-df_resultats_display = df_resultats_display.fillna("")
+df_resultats_display = preparar_taula_buida(df_resultats)
 
-# Columnes per blocs
-cols_grups = trobar_columnes(
-    df_resultats_display,
-    ["grup", "posicio", "equip"]
+# Columnes exactes segons l'Excel actual
+COL_GRUP = "Grup"
+COL_POSICIO = "Posició"
+COL_EQUIP = "Equip"
+
+COL_VUITENS = "Vuitens"
+COL_QUARTS = "Quarts"
+COL_SEMIS = "Semis"
+COL_FINALISTES = "Finalistes"
+COL_CAMPIO = "Campió"
+COL_MVP = "MVP"
+
+COL_RESULTAT_FINAL = "Resultat Final"
+
+COL_PICHICHI = "Jugador Pichichi"
+COL_GOLS = "Gols"
+
+
+# --------------------------------------------------
+# CARDS RESUM RESULTATS REALS
+# --------------------------------------------------
+campio_real = primer_valor_o_pendent(df_resultats_display, COL_CAMPIO)
+mvp_real = primer_valor_o_pendent(df_resultats_display, COL_MVP)
+resultat_final_real = primer_valor_o_pendent(df_resultats_display, COL_RESULTAT_FINAL)
+pichichi_real = primer_valor_o_pendent(df_resultats_display, COL_PICHICHI)
+
+if COL_GOLS in df_resultats_display.columns:
+    gols_series = pd.to_numeric(df_resultats_display[COL_GOLS], errors="coerce")
+    gols_valids = gols_series.dropna()
+
+    if len(gols_valids) > 0:
+        gols_pichichi = str(int(gols_valids.iloc[0]))
+    else:
+        gols_pichichi = "Pendent"
+else:
+    gols_pichichi = "Pendent"
+
+st.write("### 🏟️ Resum oficial")
+
+r1, r2, r3, r4 = st.columns(4)
+
+r1.markdown(
+    f"""
+    <div class='card gold'>
+        <h3>🏆 Campió</h3>
+        <h1 style='font-size:28px'>{campio_real}</h1>
+    </div>
+    """,
+    unsafe_allow_html=True
 )
 
-cols_eliminatoria = trobar_columnes(
-    df_resultats_display,
-    ["vuitens", "quarts", "semis", "finalistes", "campio", "mvp"]
+r2.markdown(
+    f"""
+    <div class='card silver'>
+        <h3>⭐ MVP</h3>
+        <h1 style='font-size:28px'>{mvp_real}</h1>
+    </div>
+    """,
+    unsafe_allow_html=True
 )
 
-cols_pichichi = trobar_columnes(
-    df_resultats_display,
-    ["pichichi", "gols"]
+r3.markdown(
+    f"""
+    <div class='card bronze'>
+        <h3>⚽ Pichichi</h3>
+        <h1 style='font-size:25px'>{pichichi_real}</h1>
+        <p>{gols_pichichi} gols</p>
+    </div>
+    """,
+    unsafe_allow_html=True
 )
 
-cols_final = trobar_columnes(
-    df_resultats_display,
-    ["resultat final", "final"]
+r4.markdown(
+    f"""
+    <div class='card bluecard'>
+        <h3>🏁 Resultat final</h3>
+        <h1 style='font-size:28px'>{resultat_final_real}</h1>
+    </div>
+    """,
+    unsafe_allow_html=True
 )
 
-# Evitar que "finalistes" entri a la taula de resultat final si existeix
-cols_final = [
-    col for col in cols_final
-    if "finalista" not in normalitzar_text(col)
-]
 
-# FASE DE GRUPS
+# --------------------------------------------------
+# 1. FASE DE GRUPS
+# --------------------------------------------------
 st.write("### 🧩 Fase de grups")
 
-if cols_grups:
-    taula_grups = df_resultats_display[cols_grups].copy()
-    taula_grups = taula_grups.dropna(how="all")
-    taula_grups = taula_grups[~(taula_grups.astype(str).apply(lambda x: "".join(x), axis=1).str.strip() == "")]
+cols_grups = [COL_GRUP, COL_POSICIO, COL_EQUIP]
+cols_grups_existents = [col for col in cols_grups if col in df_resultats_display.columns]
+
+if len(cols_grups_existents) > 0:
+    taula_grups = df_resultats_display[cols_grups_existents].copy()
+    taula_grups = taula_grups[fila_no_buida(taula_grups)]
+
+    if COL_EQUIP in taula_grups.columns:
+        taula_grups = taula_grups[
+            taula_grups[COL_EQUIP].astype(str).str.strip() != ""
+        ]
 
     st.dataframe(
         taula_grups,
@@ -581,15 +761,41 @@ if cols_grups:
         hide_index=True
     )
 else:
-    st.info("No s'han detectat columnes de fase de grups.")
+    st.info("No hi ha dades de fase de grups configurades.")
 
-# FASE ELIMINATÒRIA
+
+# --------------------------------------------------
+# 2. FASE ELIMINATÒRIA
+# --------------------------------------------------
 st.write("### ⚔️ Fase eliminatòria")
 
-if cols_eliminatoria:
-    taula_eliminatoria = df_resultats_display[cols_eliminatoria].copy()
-    taula_eliminatoria = taula_eliminatoria.dropna(how="all")
-    taula_eliminatoria = taula_eliminatoria[~(taula_eliminatoria.astype(str).apply(lambda x: "".join(x), axis=1).str.strip() == "")]
+fases_eliminatoria = [
+    COL_VUITENS,
+    COL_QUARTS,
+    COL_SEMIS,
+    COL_FINALISTES,
+    COL_CAMPIO,
+    COL_MVP
+]
+
+files_eliminatoria = []
+
+for fase in fases_eliminatoria:
+    if fase in df_resultats_display.columns:
+        valors = llista_valors_no_buits(df_resultats_display, fase)
+
+        if len(valors) == 0:
+            detall = "Pendent"
+        else:
+            detall = " · ".join(valors)
+
+        files_eliminatoria.append({
+            "Fase": fase,
+            "Resultat": detall
+        })
+
+if len(files_eliminatoria) > 0:
+    taula_eliminatoria = pd.DataFrame(files_eliminatoria)
 
     st.dataframe(
         taula_eliminatoria,
@@ -597,21 +803,36 @@ if cols_eliminatoria:
         hide_index=True
     )
 else:
-    st.info("No s'han detectat columnes de fase eliminatòria.")
+    st.info("No hi ha dades de fase eliminatòria configurades.")
 
-# PICHICHI
+
+# --------------------------------------------------
+# 3. PICHICHI
+# --------------------------------------------------
 st.write("### ⚽ Jugador pichichi")
 
-if cols_pichichi:
-    taula_pichichi = df_resultats_display[cols_pichichi].copy()
-    taula_pichichi = taula_pichichi.dropna(how="all")
-    taula_pichichi = taula_pichichi[~(taula_pichichi.astype(str).apply(lambda x: "".join(x), axis=1).str.strip() == "")]
+cols_pichichi = []
 
-    # Gols sense decimals
-    for col in taula_pichichi.columns:
-        if "gol" in normalitzar_text(col):
-            taula_pichichi[col] = pd.to_numeric(taula_pichichi[col], errors="coerce")
-            taula_pichichi[col] = taula_pichichi[col].astype("Int64")
+if COL_PICHICHI in df_resultats_display.columns:
+    cols_pichichi.append(COL_PICHICHI)
+
+if COL_GOLS in df_resultats_display.columns:
+    cols_pichichi.append(COL_GOLS)
+
+if len(cols_pichichi) > 0:
+    taula_pichichi = df_resultats_display[cols_pichichi].copy()
+    taula_pichichi = taula_pichichi[fila_no_buida(taula_pichichi)]
+
+    if COL_PICHICHI in taula_pichichi.columns:
+        taula_pichichi = taula_pichichi[
+            taula_pichichi[COL_PICHICHI].astype(str).str.strip() != ""
+        ]
+
+    if COL_GOLS in taula_pichichi.columns:
+        taula_pichichi[COL_GOLS] = pd.to_numeric(
+            taula_pichichi[COL_GOLS],
+            errors="coerce"
+        ).astype("Int64")
 
     st.dataframe(
         taula_pichichi,
@@ -619,26 +840,29 @@ if cols_pichichi:
         hide_index=True
     )
 else:
-    st.info("No s'han detectat columnes de pichichi/gols.")
+    st.info("No hi ha dades de pichichi configurades.")
 
-# RESULTAT FINAL
+
+# --------------------------------------------------
+# 4. RESULTAT DE LA FINAL
+# --------------------------------------------------
 st.write("### 🏁 Resultat de la final")
 
-if cols_final:
-    taula_final = df_resultats_display[cols_final].copy()
-    taula_final = taula_final.dropna(how="all")
-    taula_final = taula_final[~(taula_final.astype(str).apply(lambda x: "".join(x), axis=1).str.strip() == "")]
+resultat_final = primer_valor_o_pendent(
+    df_resultats_display,
+    COL_RESULTAT_FINAL
+)
 
-    if len(taula_final) > 0:
-        st.dataframe(
-            taula_final,
-            use_container_width=True,
-            hide_index=True
-        )
-    else:
-        st.info("Resultat de la final pendent.")
-else:
-    st.info("No s'ha detectat cap columna de resultat final.")
+taula_final = pd.DataFrame({
+    "Concepte": ["Resultat de la final"],
+    "Valor": [resultat_final]
+})
+
+st.dataframe(
+    taula_final,
+    use_container_width=True,
+    hide_index=True
+)
 
 
 # --------------------------------------------------
