@@ -1,138 +1,177 @@
 import streamlit as st
 import pandas as pd
+import altair as alt
 
-st.set_page_config(layout="wide")
+st.set_page_config(
+    page_title="Porra Mundial",
+    layout="wide"
+)
 
-# ------- LOAD DATA -------
-df_ranking = pd.read_excel("Porra_Mundial_Final_Definitiva.xlsx", sheet_name="Gràfics")
-df_porra = pd.read_excel("Porra_Mundial_Final_Definitiva.xlsx", sheet_name="Porra")
+# --------------------------------------------------
+# LOAD DATA
+# --------------------------------------------------
+EXCEL_FILE = "Porra_Mundial_Final_Definitiva.xlsx"
 
-# Netejar columnes
+df_ranking = pd.read_excel(EXCEL_FILE, sheet_name="Gràfics")
+df_porra = pd.read_excel(EXCEL_FILE, sheet_name="Porra")
+
+# Netejar noms de columnes
 df_ranking.columns = df_ranking.columns.astype(str).str.strip()
+df_porra.columns = df_porra.columns.astype(str).str.strip()
 
-# Treure "Total general"
-df_ranking = df_ranking[~df_ranking['Participant'].astype(str).str.contains("Total", case=False, na=False)]
+# --------------------------------------------------
+# DETECTAR COLUMNES
+# --------------------------------------------------
+# Columna participant del full Gràfics
+col_participant_ranking = None
+for col in df_ranking.columns:
+    if "participant" in col.lower():
+        col_participant_ranking = col
 
-# Detectar columna punts automàticament
-col_punts = [col for col in df_ranking.columns if "punt" in col.lower()][0]
+if col_participant_ranking is None:
+    st.error("No s'ha trobat la columna de participant al full Gràfics.")
+    st.write("Columnes detectades:", list(df_ranking.columns))
+    st.stop()
 
-# Ordenar i crear posició
+# Columna punts del full Gràfics
+col_punts = None
+for col in df_ranking.columns:
+    if "punt" in col.lower():
+        col_punts = col
+
+if col_punts is None:
+    st.error("No s'ha trobat la columna de punts al full Gràfics.")
+    st.write("Columnes detectades:", list(df_ranking.columns))
+    st.stop()
+
+# --------------------------------------------------
+# NETEJA DADES
+# --------------------------------------------------
+# Eliminar fila "Total general"
+df_ranking = df_ranking[
+    ~df_ranking[col_participant_ranking]
+    .astype(str)
+    .str.contains("Total", case=False, na=False)
+]
+
+# Convertir punts a numèric
+df_ranking[col_punts] = pd.to_numeric(df_ranking[col_punts], errors="coerce")
+
+# Eliminar files sense punts
+df_ranking = df_ranking.dropna(subset=[col_punts])
+
+# Ordenar general
 df_ranking = df_ranking.sort_values(col_punts, ascending=False).reset_index(drop=True)
-df_ranking["Posició"] = df_ranking.index + 1
 
-# Diferència amb líder
-df_ranking["Dif líder"] = df_ranking[col_punts] - df_ranking[col_punts].iloc[0]
+# Posició general
+df_ranking["Posició general"] = df_ranking.index + 1
 
-# ------- ESTILS -------
+# Arrodonir punts
+df_ranking[col_punts] = df_ranking[col_punts].round(1)
+
+# --------------------------------------------------
+# ESTILS
+# --------------------------------------------------
 st.markdown("""
 <style>
 .title {
-    font-size: 42px;
-    font-weight: bold;
+    font-size: 44px;
+    font-weight: 800;
+    margin-bottom: 0px;
+}
+
+.subtitle {
+    font-size: 18px;
+    color: #666;
+    margin-top: 0px;
+    margin-bottom: 25px;
 }
 
 .card {
-    padding: 20px;
-    border-radius: 15px;
+    padding: 22px;
+    border-radius: 18px;
     text-align: center;
+    box-shadow: 0px 4px 20px rgba(0,0,0,0.08);
 }
 
-.gold {background-color:#ffd700;}
-.silver {background-color:#c0c0c0;}
-.bronze {background-color:#cd7f32; color:white;}
+.gold {
+    background: linear-gradient(135deg, #ffd700, #fff1a8);
+    color: #111;
+}
 
-.lider {
-    background-color:#ffe066 !important;
-    font-weight:bold;
+.silver {
+    background: linear-gradient(135deg, #c0c0c0, #f2f2f2);
+    color: #111;
+}
+
+.bronze {
+    background: linear-gradient(135deg, #cd7f32, #f0b27a);
+    color: white;
+}
+
+.small-note {
+    font-size: 13px;
+    color: #777;
 }
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown('<p class="title">🏆 PORRA MUNDIAL</p>', unsafe_allow_html=True)
+st.markdown('<p class="subtitle">Classificació en viu i lliguetes personalitzades</p>', unsafe_allow_html=True)
 
-# ------- TOP 3 -------
-st.subheader("🥇 TOP 3")
+# --------------------------------------------------
+# FILTRE PARTICIPANTS
+# --------------------------------------------------
+st.subheader("🎛️ Filtre de participants")
 
-c1, c2, c3 = st.columns(3)
-top3 = df_ranking.head(3)
+tots_participants = df_ranking[col_participant_ranking].dropna().astype(str).tolist()
 
-c1.markdown(f"<div class='card gold'><h3>{top3.iloc[0]['Participant']}</h3><h1>{top3.iloc[0][col_punts]}</h1></div>", unsafe_allow_html=True)
-c2.markdown(f"<div class='card silver'><h3>{top3.iloc[1]['Participant']}</h3><h1>{top3.iloc[1][col_punts]}</h1></div>", unsafe_allow_html=True)
-c3.markdown(f"<div class='card bronze'><h3>{top3.iloc[2]['Participant']}</h3><h1>{top3.iloc[2][col_punts]}</h1></div>", unsafe_allow_html=True)
-
-# ------- RANKING -------
-st.subheader("📊 Classificació")
-
-def highlight_leader(row):
-    if row[col_punts] == df_ranking[col_punts].iloc[0]:
-        return ['background-color: #ffe066'] * len(row)
-    return [''] * len(row)
-
-ranking_display = df_ranking[["Posició", "Participant", col_punts, "Dif líder"]]
-
-st.dataframe(
-    ranking_display.style.apply(highlight_leader, axis=1),
-    use_container_width=True
+participants_filtrats = st.multiselect(
+    "Selecciona participants per crear una lligueta o deixa-ho buit per veure la classificació completa:",
+    options=tots_participants,
+    default=[]
 )
 
-# Gràfic visual
-st.bar_chart(df_ranking.set_index("Participant")[col_punts])
+if participants_filtrats:
+    df_view = df_ranking[
+        df_ranking[col_participant_ranking].astype(str).isin(participants_filtrats)
+    ].copy()
+else:
+    df_view = df_ranking.copy()
 
-# ------- DETALL -------
-st.subheader("👤 Fitxa participant")
+# Ordenar vista seleccionada
+df_view = df_view.sort_values(col_punts, ascending=False).reset_index(drop=True)
 
-jugador = st.selectbox("Selecciona participant", df_porra["Participants"].unique())
+# Posició dins la vista filtrada
+df_view["Posició"] = df_view.index + 1
 
-df_j = df_porra[df_porra["Participants"] == jugador]
+# Diferència respecte al líder de la vista actual
+punts_lider = df_view[col_punts].iloc[0]
+df_view["Dif líder"] = (df_view[col_punts] - punts_lider).round(1)
 
-if not df_j.empty:
+# Assegurar 1 decimal
+df_view[col_punts] = df_view[col_punts].round(1)
 
-    total = df_j["Total Punts"].values[0]
+# --------------------------------------------------
+# TOP 3
+# --------------------------------------------------
+st.subheader("🥇 TOP 3")
 
-    c1, c2 = st.columns(2)
+if len(df_view) >= 3:
+    top3 = df_view.head(3)
 
-    c1.metric("Total punts", total)
+    c1, c2, c3 = st.columns(3)
 
-    punts_dict = {
-        "1rs": df_j["Punts Grups 1r"].values[0],
-        "2ns": df_j["Punts Grups 2n"].values[0],
-        "3rs": df_j["Punts Grups 3r"].values[0],
-        "Vuitens": df_j["Punts Vuitens"].values[0],
-        "Quarts": df_j["Punts Quarts"].values[0],
-        "Semis": df_j["Punts Semis"].values[0]
-    }
+    c1.markdown(
+        f"""
+        <div class='card gold'>
+            <h3>🥇 {top3.iloc[0][col_participant_ranking]}</h3>
+            <h1>{top3.iloc[0][col_punts]:.1f}</h1>
+            <p>punts</p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
-    c1.bar_chart(punts_dict)
-
-    c2.write("### ⚽ Prediccions")
-    c2.write(f"🏆 Campió: {df_j['Campió'].values[0]}")
-    c2.write(f"⭐ MVP: {df_j['MVP'].values[0]}")
-    c2.write(f"⚽ Pichichi: {df_j['Pichichi'].values[0]}")
-
-# ------- COMPARADOR -------
-st.subheader("⚔️ Comparador")
-
-j1, j2 = st.columns(2)
-
-jugador1 = j1.selectbox("Jugador 1", df_porra["Participants"].unique(), key="j1")
-jugador2 = j2.selectbox("Jugador 2", df_porra["Participants"].unique(), key="j2")
-
-if jugador1 and jugador2:
-
-    df1 = df_porra[df_porra["Participants"] == jugador1]
-    df2 = df_porra[df_porra["Participants"] == jugador2]
-
-    if not df1.empty and not df2.empty:
-
-        p1 = df1["Total Punts"].values[0]
-        p2 = df2["Total Punts"].values[0]
-
-        c1, c2, c3 = st.columns(3)
-
-        c1.metric(jugador1, p1)
-        c2.metric("Diferència", p1 - p2)
-        c3.metric(jugador2, p2)
-
-# ------- FOOTER -------
-st.markdown("---")
-st.write("📡 Actualització automàtica des de Excel")
+    c2.markdown(
+        f"""
