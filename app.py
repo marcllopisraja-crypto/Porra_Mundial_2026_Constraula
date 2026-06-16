@@ -95,4 +95,3 @@ if jugador1 and jugador2:
 # ------- FOOTER -------
 st.markdown("---")
 st.write("📡 Actualització automàtica des de Excel")
-``
