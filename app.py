@@ -7,7 +7,10 @@ st.set_page_config(layout="wide")
 df_ranking = pd.read_excel("Porra_Mundial_Final_Definitiva.xlsx", sheet_name="Gràfics")
 df_porra = pd.read_excel("Porra_Mundial_Final_Definitiva.xlsx", sheet_name="Porra")
 
-df_ranking = df_ranking.sort_values("Punts", ascending=False)
+df_ranking.columns = df_ranking.columns.str.strip()
+
+df_ranking = df_ranking.sort_values("Punts", ascending=False
+
 
 # ------- ESTILS -------
 st.markdown("""
