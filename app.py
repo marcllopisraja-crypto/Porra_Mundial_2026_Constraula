@@ -7,57 +7,64 @@ st.set_page_config(layout="wide")
 df_ranking = pd.read_excel("Porra_Mundial_Final_Definitiva.xlsx", sheet_name="Gràfics")
 df_porra = pd.read_excel("Porra_Mundial_Final_Definitiva.xlsx", sheet_name="Porra")
 
-# Netejar columnes (espais, errors...)
+# Netejar columnes
 df_ranking.columns = df_ranking.columns.astype(str).str.strip()
 
-# Detectar columna de punts automàticament
-col_punts = None
-for col in df_ranking.columns:
-    if "punt" in col.lower():
-        col_punts = col
+# Detectar columna punts
+col_punts = [col for col in df_ranking.columns if "punt" in col.lower()][0]
 
-if col_punts is None:
-    st.error("No s'ha trobat la columna de punts. Revisa el Excel.")
-    st.write("Columnes detectades:", df_ranking.columns)
-    st.stop()
-
-# Ordenar ranking
-df_ranking = df_ranking.sort_values(col_punts, ascending=False)
+df_ranking = df_ranking.sort_values(col_punts, ascending=False).reset_index(drop=True)
 
 # ------- ESTILS -------
 st.markdown("""
-    <style>
-    .title {
-        font-size: 40px;
-        font-weight: bold;
-    }
-    .top1 {color: gold; font-size: 22px;}
-    .top2 {color: silver; font-size: 20px;}
-    .top3 {color: #cd7f32; font-size: 18px;}
-    </style>
+<style>
+.title {
+    font-size: 42px;
+    font-weight: bold;
+}
+.card {
+    padding: 20px;
+    border-radius: 15px;
+    text-align: center;
+}
+.gold {background-color:#ffd700;}
+.silver {background-color:#c0c0c0;}
+.bronze {background-color:#cd7f32; color:white;}
+</style>
 """, unsafe_allow_html=True)
 
 st.markdown('<p class="title">🏆 PORRA MUNDIAL</p>', unsafe_allow_html=True)
 
-# ------- TOP 3 -------
-st.subheader("🥇 Classificació líder")
+# ------- TOP 3 VISUAL -------
+st.subheader("🥇 TOP 3")
 
-col1, col2, col3 = st.columns(3)
+c1, c2, c3 = st.columns(3)
 
 top3 = df_ranking.head(3)
 
-col1.markdown(f"<p class='top1'>🥇 {top3.iloc[0]['Participant']}<br>{top3.iloc[0][col_punts]} punts</p>", unsafe_allow_html=True)
-col2.markdown(f"<p class='top2'>🥈 {top3.iloc[1]['Participant']}<br>{top3.iloc[1][col_punts]} punts</p>", unsafe_allow_html=True)
-col3.markdown(f"<p class='top3'>🥉 {top3.iloc[2]['Participant']}<br>{top3.iloc[2][col_punts]} punts</p>", unsafe_allow_html=True)
+c1.markdown(f"<div class='card gold'><h3>{top3.iloc[0]['Participant']}</h3><h1>{top3.iloc[0][col_punts]}</h1></div>", unsafe_allow_html=True)
+c2.markdown(f"<div class='card silver'><h3>{top3.iloc[1]['Participant']}</h3><h1>{top3.iloc[1][col_punts]}</h1></div>", unsafe_allow_html=True)
+c3.markdown(f"<div class='card bronze'><h3>{top3.iloc[2]['Participant']}</h3><h1>{top3.iloc[2][col_punts]}</h1></div>", unsafe_allow_html=True)
 
-# ------- TAULA -------
-st.subheader("📊 Classificació completa")
-st.dataframe(df_ranking, use_container_width=True)
+# ------- RANKING VISUAL -------
+st.subheader("📊 Classificació")
 
-# ------- DETALL -------
-st.subheader("👤 Fitxa participant")
+ranking_display = df_ranking.copy()
+ranking_display["Posició"] = ranking_display.index + 1
 
-jugador = st.selectbox("Selecciona participant", df_porra["Participants"])
+ranking_display["Diferència líder"] = ranking_display[col_punts] - ranking_display[col_punts].iloc[0]
+
+st.dataframe(
+    ranking_display[["Posició", "Participant", col_punts, "Diferència líder"]],
+    use_container_width=True
+)
+
+st.bar_chart(df_ranking.set_index("Participant")[col_punts])
+
+# ------- FITXA PARTICIPANT -------
+st.subheader("👤 Anàlisi participant")
+
+jugador = st.selectbox("Selecciona participant", df_porra["Participants"].unique())
 
 df_j = df_porra[df_porra["Participants"] == jugador]
 
@@ -65,31 +72,33 @@ if not df_j.empty:
 
     total = df_j["Total Punts"].values[0]
 
-    st.metric("Total punts", total)
+    c1, c2 = st.columns(2)
 
-    col1, col2 = st.columns(2)
+    c1.metric("Total punts", total)
 
     punts_dict = {
-        "Grups 1r": df_j["Punts Grups 1r"].values[0],
-        "Grups 2n": df_j["Punts Grups 2n"].values[0],
-        "Grups 3r": df_j["Punts Grups 3r"].values[0],
+        "1rs": df_j["Punts Grups 1r"].values[0],
+        "2ns": df_j["Punts Grups 2n"].values[0],
+        "3rs": df_j["Punts Grups 3r"].values[0],
         "Vuitens": df_j["Punts Vuitens"].values[0],
         "Quarts": df_j["Punts Quarts"].values[0],
         "Semis": df_j["Punts Semis"].values[0]
     }
 
-    col1.bar_chart(punts_dict)
+    c1.bar_chart(punts_dict)
 
-    col2.write("📌 Prediccions destacades:")
-    col2.write(f"🏆 Campió: {df_j['Campió'].values[0]}")
-    col2.write(f"⭐ MVP: {df_j['MVP'].values[0]}")
-    col2.write(f"⚽ Pichichi: {df_j['Pichichi'].values[0]}")
+    c2.write("### ⚽ Prediccions")
+    c2.write(f"🏆 Campió: {df_j['Campió'].values[0]}")
+    c2.write(f"⭐ MVP: {df_j['MVP'].values[0]}")
+    c2.write(f"⚽ Pichichi: {df_j['Pichichi'].values[0]}")
 
 # ------- COMPARADOR -------
 st.subheader("⚔️ Comparador")
 
-jugador1 = st.selectbox("Jugador 1", df_porra["Participants"], key="j1")
-jugador2 = st.selectbox("Jugador 2", df_porra["Participants"], key="j2")
+j1, j2 = st.columns(2)
+
+jugador1 = j1.selectbox("Jugador 1", df_porra["Participants"].unique(), key="j1")
+jugador2 = j2.selectbox("Jugador 2", df_porra["Participants"].unique(), key="j2")
 
 if jugador1 and jugador2:
 
@@ -101,11 +110,11 @@ if jugador1 and jugador2:
         p1 = df1["Total Punts"].values[0]
         p2 = df2["Total Punts"].values[0]
 
-        col1, col2, col3 = st.columns(3)
+        c1, c2, c3 = st.columns(3)
 
-        col1.metric(jugador1, p1)
-        col2.metric("Diferència", p1 - p2)
-        col3.metric(jugador2, p2)
+        c1.metric(jugador1, p1)
+        c2.metric("Diferència", p1 - p2)
+        c3.metric(jugador2, p2)
 
 # ------- FOOTER -------
 st.markdown("---")
