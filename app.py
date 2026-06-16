@@ -8,10 +8,13 @@ st.set_page_config(
 )
 
 # --------------------------------------------------
-# LOAD DATA
+# CONFIGURACIÓ
 # --------------------------------------------------
 EXCEL_FILE = "Porra_Mundial_Final_Definitiva.xlsx"
 
+# --------------------------------------------------
+# LOAD DATA
+# --------------------------------------------------
 df_ranking = pd.read_excel(EXCEL_FILE, sheet_name="Gràfics")
 df_porra = pd.read_excel(EXCEL_FILE, sheet_name="Porra")
 
@@ -20,9 +23,8 @@ df_ranking.columns = df_ranking.columns.astype(str).str.strip()
 df_porra.columns = df_porra.columns.astype(str).str.strip()
 
 # --------------------------------------------------
-# DETECTAR COLUMNES
+# DETECTAR COLUMNES DEL RÀNQUING
 # --------------------------------------------------
-# Columna participant del full Gràfics
 col_participant_ranking = None
 for col in df_ranking.columns:
     if "participant" in col.lower():
@@ -33,7 +35,6 @@ if col_participant_ranking is None:
     st.write("Columnes detectades:", list(df_ranking.columns))
     st.stop()
 
-# Columna punts del full Gràfics
 col_punts = None
 for col in df_ranking.columns:
     if "punt" in col.lower():
@@ -45,14 +46,14 @@ if col_punts is None:
     st.stop()
 
 # --------------------------------------------------
-# NETEJA DADES
+# NETEJA DEL RÀNQUING
 # --------------------------------------------------
 # Eliminar fila "Total general"
 df_ranking = df_ranking[
     ~df_ranking[col_participant_ranking]
     .astype(str)
     .str.contains("Total", case=False, na=False)
-]
+].copy()
 
 # Convertir punts a numèric
 df_ranking[col_punts] = pd.to_numeric(df_ranking[col_punts], errors="coerce")
@@ -66,7 +67,7 @@ df_ranking = df_ranking.sort_values(col_punts, ascending=False).reset_index(drop
 # Posició general
 df_ranking["Posició general"] = df_ranking.index + 1
 
-# Arrodonir punts
+# Arrodonir punts a 1 decimal
 df_ranking[col_punts] = df_ranking[col_punts].round(1)
 
 # --------------------------------------------------
@@ -92,6 +93,7 @@ st.markdown("""
     border-radius: 18px;
     text-align: center;
     box-shadow: 0px 4px 20px rgba(0,0,0,0.08);
+    min-height: 150px;
 }
 
 .gold {
@@ -107,6 +109,15 @@ st.markdown("""
 .bronze {
     background: linear-gradient(135deg, #cd7f32, #f0b27a);
     color: white;
+}
+
+.card h3 {
+    margin-bottom: 10px;
+}
+
+.card h1 {
+    margin: 0px;
+    font-size: 42px;
 }
 
 .small-note {
@@ -142,12 +153,16 @@ else:
 # Ordenar vista seleccionada
 df_view = df_view.sort_values(col_punts, ascending=False).reset_index(drop=True)
 
-# Posició dins la vista filtrada
+# Posició dins la vista actual
 df_view["Posició"] = df_view.index + 1
 
-# Diferència respecte al líder de la vista actual
-punts_lider = df_view[col_punts].iloc[0]
-df_view["Dif líder"] = (df_view[col_punts] - punts_lider).round(1)
+# Diferència respecte líder de la vista actual
+if len(df_view) > 0:
+    punts_lider = float(df_view[col_punts].iloc[0])
+    df_view["Dif líder"] = (df_view[col_punts] - punts_lider).round(1)
+else:
+    st.warning("No hi ha participants seleccionats.")
+    st.stop()
 
 # Assegurar 1 decimal
 df_view[col_punts] = df_view[col_punts].round(1)
@@ -162,11 +177,20 @@ if len(df_view) >= 3:
 
     c1, c2, c3 = st.columns(3)
 
+    nom1 = top3.iloc[0][col_participant_ranking]
+    punts1 = float(top3.iloc[0][col_punts])
+
+    nom2 = top3.iloc[1][col_participant_ranking]
+    punts2 = float(top3.iloc[1][col_punts])
+
+    nom3 = top3.iloc[2][col_participant_ranking]
+    punts3 = float(top3.iloc[2][col_punts])
+
     c1.markdown(
         f"""
         <div class='card gold'>
-            <h3>🥇 {top3.iloc[0][col_participant_ranking]}</h3>
-            <h1>{top3.iloc[0][col_punts]:.1f}</h1>
+            <h3>🥇 {nom1}</h3>
+            <h1>{punts1:.1f}</h1>
             <p>punts</p>
         </div>
         """,
@@ -175,3 +199,197 @@ if len(df_view) >= 3:
 
     c2.markdown(
         f"""
+        <div class='card silver'>
+            <h3>🥈 {nom2}</h3>
+            <h1>{punts2:.1f}</h1>
+            <p>punts</p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    c3.markdown(
+        f"""
+        <div class='card bronze'>
+            <h3>🥉 {nom3}</h3>
+            <h1>{punts3:.1f}</h1>
+            <p>punts</p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+elif len(df_view) > 0:
+    st.info("Selecciona com a mínim 3 participants si vols veure el TOP 3 complet.")
+
+# --------------------------------------------------
+# CLASSIFICACIÓ
+# --------------------------------------------------
+st.subheader("📊 Classificació")
+
+ranking_display = df_view[
+    ["Posició", "Posició general", col_participant_ranking, col_punts, "Dif líder"]
+].copy()
+
+ranking_display = ranking_display.rename(columns={
+    col_participant_ranking: "Participant",
+    col_punts: "Punts"
+})
+
+ranking_display["Punts"] = ranking_display["Punts"].astype(float).round(1)
+ranking_display["Dif líder"] = ranking_display["Dif líder"].astype(float).round(1)
+
+def highlight_leader(row):
+    if row["Posició"] == 1:
+        return ["background-color: #ffe066; font-weight: bold;"] * len(row)
+    return [""] * len(row)
+
+styled_ranking = (
+    ranking_display
+    .style
+    .apply(highlight_leader, axis=1)
+    .format({
+        "Punts": "{:.1f}",
+        "Dif líder": "{:.1f}"
+    })
+)
+
+st.dataframe(
+    styled_ranking,
+    use_container_width=True,
+    hide_index=True,
+    column_config={
+        "Posició": st.column_config.NumberColumn("Posició", format="%d"),
+        "Posició general": st.column_config.NumberColumn("Posició general", format="%d"),
+        "Punts": st.column_config.NumberColumn("Punts", format="%.1f"),
+        "Dif líder": st.column_config.NumberColumn("Dif líder", format="%.1f"),
+    }
+)
+
+# --------------------------------------------------
+# GRÀFIC ORDENAT
+# --------------------------------------------------
+st.subheader("📈 Gràfic de punts")
+
+chart_data = ranking_display.copy()
+chart_data = chart_data.sort_values("Punts", ascending=False)
+
+chart_height = max(350, min(900, len(chart_data) * 24))
+
+chart = (
+    alt.Chart(chart_data)
+    .mark_bar(color="#0b70c9")
+    .encode(
+        x=alt.X(
+            "Punts:Q",
+            title="Punts",
+            scale=alt.Scale(zero=False)
+        ),
+        y=alt.Y(
+            "Participant:N",
+            sort="-x",
+            title=None
+        ),
+        tooltip=[
+            alt.Tooltip("Posició:Q", title="Posició"),
+            alt.Tooltip("Posició general:Q", title="Posició general"),
+            alt.Tooltip("Participant:N", title="Participant"),
+            alt.Tooltip("Punts:Q", title="Punts", format=".1f"),
+            alt.Tooltip("Dif líder:Q", title="Dif. líder", format=".1f")
+        ]
+    )
+    .properties(height=chart_height)
+)
+
+st.altair_chart(chart, use_container_width=True)
+
+# --------------------------------------------------
+# FITXA PARTICIPANT
+# --------------------------------------------------
+st.subheader("👤 Fitxa participant")
+
+participants_porra = df_porra["Participants"].dropna().astype(str).unique()
+
+jugador = st.selectbox(
+    "Selecciona participant",
+    participants_porra
+)
+
+df_j = df_porra[df_porra["Participants"].astype(str) == str(jugador)]
+
+if not df_j.empty:
+
+    total = pd.to_numeric(df_j["Total Punts"].values[0], errors="coerce")
+
+    c1, c2 = st.columns(2)
+
+    c1.metric("Total punts", f"{total:.1f}")
+
+    punts_dict = {
+        "1rs grup": pd.to_numeric(df_j["Punts Grups 1r"].values[0], errors="coerce"),
+        "2ns grup": pd.to_numeric(df_j["Punts Grups 2n"].values[0], errors="coerce"),
+        "3rs grup": pd.to_numeric(df_j["Punts Grups 3r"].values[0], errors="coerce"),
+        "Vuitens": pd.to_numeric(df_j["Punts Vuitens"].values[0], errors="coerce"),
+        "Quarts": pd.to_numeric(df_j["Punts Quarts"].values[0], errors="coerce"),
+        "Semis": pd.to_numeric(df_j["Punts Semis"].values[0], errors="coerce"),
+        "Finalistes": pd.to_numeric(df_j["Punts Finalistes"].values[0], errors="coerce"),
+        "Campió": pd.to_numeric(df_j["Punts Campió"].values[0], errors="coerce"),
+        "MVP": pd.to_numeric(df_j["Punts MVP"].values[0], errors="coerce"),
+        "Pichichi": pd.to_numeric(df_j["Punts Pichichi"].values[0], errors="coerce"),
+    }
+
+    punts_categoria = pd.DataFrame({
+        "Categoria": list(punts_dict.keys()),
+        "Punts": list(punts_dict.values())
+    })
+
+    punts_categoria["Punts"] = punts_categoria["Punts"].fillna(0).round(1)
+
+    chart_cat = (
+        alt.Chart(punts_categoria)
+        .mark_bar(color="#1f77b4")
+        .encode(
+            x=alt.X("Categoria:N", sort=None, title=None),
+            y=alt.Y("Punts:Q", title="Punts"),
+            tooltip=[
+                alt.Tooltip("Categoria:N", title="Categoria"),
+                alt.Tooltip("Punts:Q", title="Punts", format=".1f")
+            ]
+        )
+        .properties(height=320)
+    )
+
+    c1.altair_chart(chart_cat, use_container_width=True)
+
+    c2.write("### ⚽ Prediccions")
+    c2.write(f"🏆 Campió: {df_j['Campió'].values[0]}")
+    c2.write(f"⭐ MVP: {df_j['MVP'].values[0]}")
+    c2.write(f"⚽ Pichichi: {df_j['Pichichi'].values[0]}")
+
+# --------------------------------------------------
+# LLIGUETA SELECCIONADA
+# --------------------------------------------------
+st.subheader("🏟️ Lligueta seleccionada")
+
+if participants_filtrats:
+    st.write(f"Participants seleccionats: **{len(participants_filtrats)}**")
+
+    st.dataframe(
+        styled_ranking,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Posició": st.column_config.NumberColumn("Posició", format="%d"),
+            "Posició general": st.column_config.NumberColumn("Posició general", format="%d"),
+            "Punts": st.column_config.NumberColumn("Punts", format="%.1f"),
+            "Dif líder": st.column_config.NumberColumn("Dif líder", format="%.1f"),
+        }
+    )
+else:
+    st.write("Selecciona participants al filtre superior per crear una lligueta personalitzada.")
+
+# --------------------------------------------------
+# FOOTER
+# --------------------------------------------------
+st.markdown("---")
+st.write("📡 Actualització automàtica des de Excel")
