@@ -295,6 +295,74 @@ def obtenir_pichichi_real(df_resultats_display, col_pichichi, col_gols):
     return jugador, str(gols)
 
 
+def obtenir_prediccions_fase(df_j, prefix, quantitat):
+    files = []
+
+    for i in range(1, quantitat + 1):
+        col = f"{prefix}_{i}"
+        if col in df_j.columns:
+            valor = valor_o_pendent(df_j[col].values[0])
+        else:
+            valor = "Pendent"
+
+        files.append({
+            "Posició": i,
+            "Equip": valor
+        })
+
+    return pd.DataFrame(files)
+
+
+def mostrar_prediccions_eliminatoria_participant(df_j):
+    st.write("### 🧭 Prediccions fase eliminatòria")
+
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "Vuitens",
+        "Quarts",
+        "Semis",
+        "Final",
+        "Campió"
+    ])
+
+    with tab1:
+        df_vuitens = obtenir_prediccions_fase(df_j, "Vuitens", 16)
+        st.dataframe(df_vuitens, use_container_width=True, hide_index=True)
+
+    with tab2:
+        df_quarts = obtenir_prediccions_fase(df_j, "Quarts", 8)
+        st.dataframe(df_quarts, use_container_width=True, hide_index=True)
+
+    with tab3:
+        df_semis = obtenir_prediccions_fase(df_j, "Semis", 4)
+        st.dataframe(df_semis, use_container_width=True, hide_index=True)
+
+    with tab4:
+        finalistes = []
+
+        for col in ["Final_1", "Final_2"]:
+            if col in df_j.columns:
+                finalistes.append(valor_o_pendent(df_j[col].values[0]))
+            else:
+                finalistes.append("Pendent")
+
+        df_final = pd.DataFrame({
+            "Finalista": ["Finalista 1", "Finalista 2"],
+            "Equip": finalistes
+        })
+
+        st.dataframe(df_final, use_container_width=True, hide_index=True)
+
+    with tab5:
+        campio = valor_o_pendent(df_j["Campió"].values[0]) if "Campió" in df_j.columns else "Pendent"
+
+        df_campio = pd.DataFrame({
+            "Concepte": ["Campió previst"],
+            "Equip": [campio]
+        })
+
+        st.dataframe(df_campio, use_container_width=True, hide_index=True)
+
+
 # --------------------------------------------------
 # ESTILS + FONS
 # --------------------------------------------------
@@ -350,7 +418,13 @@ st.markdown(
         border-radius: 18px;
         text-align: center;
         box-shadow: 0px 4px 20px rgba(0,0,0,0.18);
-        min-height: 150px;
+        height: 180px;
+        min-height: 180px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        box-sizing: border-box;
     }}
 
     .gold {{
@@ -384,16 +458,19 @@ st.markdown(
     }}
 
     .card h3 {{
-        margin-bottom: 10px;
+        margin: 0px 0px 18px 0px;
+        font-size: 26px;
     }}
 
     .card h1 {{
         margin: 0px;
-        font-size: 42px;
+        font-size: 38px;
+        line-height: 1.1;
     }}
 
     .card p {{
-        margin: 5px 0px 0px 0px;
+        margin: 18px 0px 0px 0px;
+        font-size: 15px;
     }}
     </style>
     """,
@@ -433,7 +510,7 @@ info1.markdown(
     f"""
     <div class='card darkcard'>
         <h3>🕒 Dades actualitzades</h3>
-        <h1 style='font-size:28px'>{data_actualitzacio}</h1>
+        <h1>{data_actualitzacio}</h1>
     </div>
     """,
     unsafe_allow_html=True
@@ -443,7 +520,7 @@ info2.markdown(
     f"""
     <div class='card greencard'>
         <h3>🎁 Premi guanyador</h3>
-        <h1 style='font-size:36px'>{premi_guanyador} €</h1>
+        <h1>{premi_guanyador} €</h1>
         <p>{num_participants} participants x {PREU_PARTICIPACIO} €</p>
     </div>
     """,
@@ -454,7 +531,7 @@ info3.markdown(
     f"""
     <div class='card bluecard'>
         <h3>👥 Participants</h3>
-        <h1 style='font-size:36px'>{num_participants}</h1>
+        <h1>{num_participants}</h1>
         <p>porres registrades</p>
     </div>
     """,
@@ -595,11 +672,13 @@ if jugador is not None:
         else:
             resultat_final = "Pendent"
 
-        c2.write("### ⚽ Prediccions")
+        c2.write("### ⚽ Prediccions principals")
         c2.write(f"🏆 Campió: {valor_o_pendent(df_j['Campió'].values[0])}")
         c2.write(f"📌 Resultat final: {resultat_final}")
         c2.write(f"⭐ MVP: {valor_o_pendent(df_j['MVP'].values[0])}")
         c2.write(f"⚽ Pichichi: {valor_o_pendent(df_j['Pichichi'].values[0])}")
+
+        mostrar_prediccions_eliminatoria_participant(df_j)
 
 else:
     st.info("Selecciona un participant per veure el detall de punts i prediccions.")
@@ -702,12 +781,14 @@ r2.markdown(
     unsafe_allow_html=True
 )
 
+pichichi_subtext = f"{gols_pichichi} gols" if gols_pichichi != "Pendent" else "Pendent"
+
 r3.markdown(
     f"""
     <div class='card bronze'>
         <h3>⚽ Pichichi</h3>
         <h1 style='font-size:25px'>{pichichi_real}</h1>
-        <p>{gols_pichichi if gols_pichichi != "Pendent" else "Pendent"} gols</p>
+        <p>{pichichi_subtext}</p>
     </div>
     """,
     unsafe_allow_html=True
@@ -725,27 +806,45 @@ r4.markdown(
 
 
 # --------------------------------------------------
-# 1. FASE DE GRUPS
+# 1. FASE DE GRUPS EN COLUMNES
 # --------------------------------------------------
 st.write("### 🧩 Fase de grups")
 
-cols_grups = [COL_GRUP, COL_POSICIO, COL_EQUIP]
-cols_grups_existents = [col for col in cols_grups if col in df_resultats_display.columns]
+grups = {}
 
-if len(cols_grups_existents) > 0:
-    taula_grups = df_resultats_display[cols_grups_existents].copy()
-    taula_grups = taula_grups[fila_no_buida(taula_grups)]
+if all(col in df_resultats_display.columns for col in [COL_GRUP, COL_POSICIO, COL_EQUIP]):
+    for _, row in df_resultats_display.iterrows():
+        grup = str(row.get(COL_GRUP, "")).strip()
+        posicio = str(row.get(COL_POSICIO, "")).strip()
+        equip = str(row.get(COL_EQUIP, "")).strip()
 
-    if COL_EQUIP in taula_grups.columns:
-        taula_grups = taula_grups[
-            taula_grups[COL_EQUIP].astype(str).str.strip() != ""
-        ]
+        if grup == "" or equip == "":
+            continue
 
-    st.dataframe(
-        taula_grups,
-        use_container_width=True,
-        hide_index=True
-    )
+        if grup not in grups:
+            grups[grup] = {
+                "1r": "",
+                "2n": "",
+                "3r": ""
+            }
+
+        if posicio in ["1r", "1", "1º"]:
+            grups[grup]["1r"] = equip
+        elif posicio in ["2n", "2", "2º"]:
+            grups[grup]["2n"] = equip
+        elif posicio in ["3r", "3", "3º"]:
+            grups[grup]["3r"] = equip
+
+    if len(grups) > 0:
+        df_grups = pd.DataFrame(grups)
+        df_grups = df_grups.reindex(["1r", "2n", "3r"])
+
+        st.dataframe(
+            df_grups,
+            use_container_width=True
+        )
+    else:
+        st.info("No hi ha dades de fase de grups configurades.")
 else:
     st.info("No hi ha dades de fase de grups configurades.")
 
