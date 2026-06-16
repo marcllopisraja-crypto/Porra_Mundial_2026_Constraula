@@ -10,10 +10,18 @@ df_porra = pd.read_excel("Porra_Mundial_Final_Definitiva.xlsx", sheet_name="Porr
 # Netejar columnes
 df_ranking.columns = df_ranking.columns.astype(str).str.strip()
 
-# Detectar columna punts
+# Treure "Total general"
+df_ranking = df_ranking[~df_ranking['Participant'].astype(str).str.contains("Total", case=False, na=False)]
+
+# Detectar columna punts automàticament
 col_punts = [col for col in df_ranking.columns if "punt" in col.lower()][0]
 
+# Ordenar i crear posició
 df_ranking = df_ranking.sort_values(col_punts, ascending=False).reset_index(drop=True)
+df_ranking["Posició"] = df_ranking.index + 1
+
+# Diferència amb líder
+df_ranking["Dif líder"] = df_ranking[col_punts] - df_ranking[col_punts].iloc[0]
 
 # ------- ESTILS -------
 st.markdown("""
@@ -22,47 +30,56 @@ st.markdown("""
     font-size: 42px;
     font-weight: bold;
 }
+
 .card {
     padding: 20px;
     border-radius: 15px;
     text-align: center;
 }
+
 .gold {background-color:#ffd700;}
 .silver {background-color:#c0c0c0;}
 .bronze {background-color:#cd7f32; color:white;}
+
+.lider {
+    background-color:#ffe066 !important;
+    font-weight:bold;
+}
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown('<p class="title">🏆 PORRA MUNDIAL</p>', unsafe_allow_html=True)
 
-# ------- TOP 3 VISUAL -------
+# ------- TOP 3 -------
 st.subheader("🥇 TOP 3")
 
 c1, c2, c3 = st.columns(3)
-
 top3 = df_ranking.head(3)
 
 c1.markdown(f"<div class='card gold'><h3>{top3.iloc[0]['Participant']}</h3><h1>{top3.iloc[0][col_punts]}</h1></div>", unsafe_allow_html=True)
 c2.markdown(f"<div class='card silver'><h3>{top3.iloc[1]['Participant']}</h3><h1>{top3.iloc[1][col_punts]}</h1></div>", unsafe_allow_html=True)
 c3.markdown(f"<div class='card bronze'><h3>{top3.iloc[2]['Participant']}</h3><h1>{top3.iloc[2][col_punts]}</h1></div>", unsafe_allow_html=True)
 
-# ------- RANKING VISUAL -------
+# ------- RANKING -------
 st.subheader("📊 Classificació")
 
-ranking_display = df_ranking.copy()
-ranking_display["Posició"] = ranking_display.index + 1
+def highlight_leader(row):
+    if row[col_punts] == df_ranking[col_punts].iloc[0]:
+        return ['background-color: #ffe066'] * len(row)
+    return [''] * len(row)
 
-ranking_display["Diferència líder"] = ranking_display[col_punts] - ranking_display[col_punts].iloc[0]
+ranking_display = df_ranking[["Posició", "Participant", col_punts, "Dif líder"]]
 
 st.dataframe(
-    ranking_display[["Posició", "Participant", col_punts, "Diferència líder"]],
+    ranking_display.style.apply(highlight_leader, axis=1),
     use_container_width=True
 )
 
+# Gràfic visual
 st.bar_chart(df_ranking.set_index("Participant")[col_punts])
 
-# ------- FITXA PARTICIPANT -------
-st.subheader("👤 Anàlisi participant")
+# ------- DETALL -------
+st.subheader("👤 Fitxa participant")
 
 jugador = st.selectbox("Selecciona participant", df_porra["Participants"].unique())
 
