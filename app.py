@@ -7,10 +7,22 @@ st.set_page_config(layout="wide")
 df_ranking = pd.read_excel("Porra_Mundial_Final_Definitiva.xlsx", sheet_name="Gràfics")
 df_porra = pd.read_excel("Porra_Mundial_Final_Definitiva.xlsx", sheet_name="Porra")
 
-df_ranking.columns = df_ranking.columns.str.strip()
+# Netejar columnes (espais, errors...)
+df_ranking.columns = df_ranking.columns.astype(str).str.strip()
 
-df_ranking = df_ranking.sort_values("Punts", ascending=False)
+# Detectar columna de punts automàticament
+col_punts = None
+for col in df_ranking.columns:
+    if "punt" in col.lower():
+        col_punts = col
 
+if col_punts is None:
+    st.error("No s'ha trobat la columna de punts. Revisa el Excel.")
+    st.write("Columnes detectades:", df_ranking.columns)
+    st.stop()
+
+# Ordenar ranking
+df_ranking = df_ranking.sort_values(col_punts, ascending=False)
 
 # ------- ESTILS -------
 st.markdown("""
@@ -34,9 +46,9 @@ col1, col2, col3 = st.columns(3)
 
 top3 = df_ranking.head(3)
 
-col1.markdown(f"<p class='top1'>🥇 {top3.iloc[0]['Participant']}<br>{top3.iloc[0]['Punts']} punts</p>", unsafe_allow_html=True)
-col2.markdown(f"<p class='top2'>🥈 {top3.iloc[1]['Participant']}<br>{top3.iloc[1]['Punts']} punts</p>", unsafe_allow_html=True)
-col3.markdown(f"<p class='top3'>🥉 {top3.iloc[2]['Participant']}<br>{top3.iloc[2]['Punts']} punts</p>", unsafe_allow_html=True)
+col1.markdown(f"<p class='top1'>🥇 {top3.iloc[0]['Participant']}<br>{top3.iloc[0][col_punts]} punts</p>", unsafe_allow_html=True)
+col2.markdown(f"<p class='top2'>🥈 {top3.iloc[1]['Participant']}<br>{top3.iloc[1][col_punts]} punts</p>", unsafe_allow_html=True)
+col3.markdown(f"<p class='top3'>🥉 {top3.iloc[2]['Participant']}<br>{top3.iloc[2][col_punts]} punts</p>", unsafe_allow_html=True)
 
 # ------- TAULA -------
 st.subheader("📊 Classificació completa")
@@ -68,7 +80,7 @@ if not df_j.empty:
 
     col1.bar_chart(punts_dict)
 
-    st.write("📌 Prediccions destacades:")
+    col2.write("📌 Prediccions destacades:")
     col2.write(f"🏆 Campió: {df_j['Campió'].values[0]}")
     col2.write(f"⭐ MVP: {df_j['MVP'].values[0]}")
     col2.write(f"⚽ Pichichi: {df_j['Pichichi'].values[0]}")
