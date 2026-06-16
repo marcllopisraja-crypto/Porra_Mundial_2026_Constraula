@@ -233,14 +233,6 @@ def preparar_taula_buida(df):
     return df
 
 
-def fila_no_buida(df):
-    return (
-        df.astype(str)
-        .apply(lambda fila: "".join(fila), axis=1)
-        .str.strip() != ""
-    )
-
-
 def trobar_col_resultat_final_porra(df_porra):
     for col in df_porra.columns:
         if col.strip() == "Resultat final":
@@ -282,6 +274,7 @@ def crear_ranking_des_de_porra(df_porra):
     col_dep = obtenir_columna_departament(df_porra)
 
     cols_base = ["Participants", "Total Punts"]
+
     if col_dep is not None:
         cols_base.append(col_dep)
 
@@ -309,7 +302,6 @@ def crear_ranking_des_de_porra(df_porra):
     df = df[~df["Participant"].str.contains("Total", case=False, na=False)]
 
     df["Punts"] = df["Punts"].round(1)
-
     df = recalcular_posicions(df)
 
     return df
@@ -712,6 +704,8 @@ st.markdown(
     .purplecard {{
         background: linear-gradient(135deg, #6f42c1, #b982ff);
         color: white;
+        margin-top: 18px;
+        margin-bottom: 18px;
     }}
 
     .card h3 {{
@@ -839,7 +833,7 @@ info3.markdown(
 
 
 # --------------------------------------------------
-# DEPARTAMENT GUANYADOR - CARD EXTRA
+# DEPARTAMENT LÍDER
 # --------------------------------------------------
 if te_departaments:
     dept_lider = df_departaments.iloc[0]
@@ -873,6 +867,7 @@ top_cards = [
 
 for col, (medalla, classe, row) in zip([c1, c2, c3], top_cards):
     subtext = "punts"
+
     if "Departament" in row.index:
         subtext = f"{row['Departament']}"
 
@@ -927,6 +922,7 @@ if jugador is not None:
         c1.metric("Total punts", f"{total:.1f}")
 
         col_dep_original = obtenir_columna_departament(df_porra)
+
         if col_dep_original is not None:
             departament_jugador = valor_o_pendent(df_j[col_dep_original].values[0])
             c1.metric("Departament", departament_jugador)
@@ -999,21 +995,44 @@ if te_departaments:
     st.write("#### 📈 Gràfic departaments")
     mostrar_grafic_departaments(df_departaments)
 
-    departaments_opcions = ["Tots"] + sorted(df_ranking["Departament"].dropna().astype(str).unique().tolist())
+    st.write("### 🎯 Classificació interna per departament")
+
+    departaments_opcions = sorted(df_ranking["Departament"].dropna().astype(str).unique().tolist())
 
     departament_sel = st.selectbox(
-        "Filtra la classificació individual per departament",
-        departaments_opcions
+        "Selecciona departament",
+        departaments_opcions,
+        index=None,
+        placeholder="Selecciona un departament..."
     )
 
-    if departament_sel != "Tots":
+    if departament_sel:
         df_dep_individual = df_ranking[df_ranking["Departament"] == departament_sel].copy()
         df_dep_individual = recalcular_posicions(df_dep_individual)
 
-        st.write(f"### Classificació individual · {departament_sel}")
+        st.write(f"### 🥇 TOP 3 · {departament_sel}")
+
+        dep_top = df_dep_individual.head(3)
+        dep_cols = st.columns(3, gap="small")
+        medalles = ["🥇", "🥈", "🥉"]
+        classes = ["gold", "silver", "bronze"]
+
+        for i in range(min(3, len(dep_top))):
+            dep_cols[i].markdown(
+                f"""
+                <div class='card {classes[i]}'>
+                    <h3>{medalles[i]} {dep_top.iloc[i]["Participant"]}</h3>
+                    <h1>{float(dep_top.iloc[i]["Punts"]):.1f}</h1>
+                    <p>{departament_sel}</p>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+        st.write(f"### 📊 Classificació interna · {departament_sel}")
         mostrar_taula_ranking(df_dep_individual)
 
-        st.write(f"#### 📈 Gràfic · {departament_sel}")
+        st.write(f"### 📈 Gràfic · {departament_sel}")
         mostrar_grafic_punts(df_dep_individual, color="#6f42c1", altura_minima=350)
 
 else:
@@ -1021,7 +1040,7 @@ else:
 
 
 # --------------------------------------------------
-# LLIGUETES - JUST ABANS DELS RESULTATS
+# LLIGUETES
 # --------------------------------------------------
 st.subheader("🏟️ Lligueta personalitzada")
 
@@ -1053,7 +1072,7 @@ else:
 
 
 # --------------------------------------------------
-# RESULTATS REALS - DASHBOARD
+# RESULTATS REALS
 # --------------------------------------------------
 st.subheader("✅ Resultats reals")
 
@@ -1138,7 +1157,7 @@ r4.markdown(
 
 
 # --------------------------------------------------
-# 1. FASE DE GRUPS EN COLUMNES
+# FASE DE GRUPS
 # --------------------------------------------------
 st.write("### 🧩 Fase de grups")
 
@@ -1184,7 +1203,7 @@ else:
 
 
 # --------------------------------------------------
-# 2. FASE ELIMINATÒRIA
+# FASE ELIMINATÒRIA
 # --------------------------------------------------
 st.write("### ⚔️ Fase eliminatòria")
 
@@ -1231,7 +1250,7 @@ else:
 
 
 # --------------------------------------------------
-# 3. PICHICHI
+# PICHICHI
 # --------------------------------------------------
 st.write("### ⚽ Jugador pichichi")
 
@@ -1278,7 +1297,7 @@ else:
 
 
 # --------------------------------------------------
-# 4. RESULTAT DE LA FINAL
+# RESULTAT FINAL
 # --------------------------------------------------
 st.write("### 🏁 Resultat de la final")
 
