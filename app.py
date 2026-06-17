@@ -389,201 +389,115 @@ def crear_ranking_departaments(df_ranking):
 # --------------------------------------------------
 # SNAPSHOT / MOVIMENT AUTOMÀTIC
 # --------------------------------------------------
-def carregar_meta_snapshot():
-    if not os.path.exists(SNAPSHOT_META_FILE):
-        return {}
-
-    try:
-        with open(SNAPSHOT_META_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def guardar_meta_snapshot(excel_mtime):
-    meta = {
-        "excel_mtime": float(excel_mtime),
-        "updated_at": datetime.now(tz=ZoneInfo("Europe/Madrid")).isoformat()
-    }
-
-    with open(SNAPSHOT_META_FILE, "w", encoding="utf-8") as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
-
-
-def carregar_csv_segura(path):
-    if not os.path.exists(path):
-        return pd.DataFrame()
-
-    try:
-        return pd.read_csv(path)
-    except Exception:
-        return pd.DataFrame()
-
-
-def guardar_snapshot_actual(df_ranking):
-    cols = ["Participant", "Punts", "Posició"]
-
-    df_snapshot = df_ranking[cols].copy()
-    df_snapshot = df_snapshot.rename(columns={
-        "Punts": "Punts anteriors",
-        "Posició": "Posició anterior"
-    })
-
-    df_snapshot.to_csv(SNAPSHOT_CURRENT_FILE, index=False)
-
-
-def guardar_snapshot_display(df_ranking):
-    cols = [
-        "Participant",
-        "Indicador",
-        "Mov. posició",
-        "Canvi punts",
-        "Canvi posició",
-        "Punts anteriors",
-        "Posició anterior"
-    ]
-
-    cols_existents = [c for c in cols if c in df_ranking.columns]
-
-    df_display = df_ranking[cols_existents].copy()
-    df_display.to_csv(SNAPSHOT_DISPLAY_FILE, index=False)
-
-
 def aplicar_moviment(df_ranking, excel_mtime):
     df_actual = df_ranking.copy()
 
-    def posar_neutral(df):
-        df = df.copy()
-        df["Posició anterior"] = df["Posició"]
-        df["Punts anteriors"] = df["Punts"]
-        df["Canvi punts"] = 0.0
-        df["Canvi posició"] = 0
-        df["Indicador"] = "⚪ —"
-        df["Mov. posició"] = "—"
-        return df
+    SNAPSHOT_PREV = "ranking_snapshot_previous.csv"
+    SNAPSHOT_CURR = "ranking_snapshot_current.csv"
 
+    def carregar(path):
+        if os.path.exists(path):
+            try:
+                return pd.read_csv(path)
+            except:
+                return pd.DataFrame()
+        return pd.DataFrame()
+
+    def guardar(path, df):
+        df.to_csv(path, index=False)
+
+    # Carreguem snapshots
+    df_prev = carregar(SNAPSHOT_PREV)
+    df_curr = carregar(SNAPSHOT_CURR)
+
+    # Si és la primera vegada
+    if df_curr.empty:
+        df_actual["Indicador"] = "⚪ —"
+        df_actual["Mov. posició"] = "—"
+        df_actual["Canvi punts"] = 0.0
+
+        guardar(SNAPSHOT_CURR, df_actual[["Participant", "Punts", "Posició"]])
+        return df_actual
+
+    # Si Excel NO ha canviat → no recalcular res
     meta = carregar_meta_snapshot()
     meta_mtime = meta.get("excel_mtime", None)
 
-    # Si l'Excel no ha canviat, recuperem el moviment guardat
-    if meta_mtime is not None and float(meta_mtime) == float(excel_mtime):
-        df_mov = carregar_csv_segura(SNAPSHOT_DISPLAY_FILE)
+    if meta_mtime == excel_mtime and not df_curr.empty:
+        # tornar mateix estat (no recalcular)
+        df_actual = df_actual.merge(
+            df_curr,
+            on="Participant",
+            how="left",
+            suffixes=("", "_old")
+        )
 
-        if not df_mov.empty and "Participant" in df_mov.columns:
-            df_actual = df_actual.merge(
-                df_mov,
-                on="Participant",
-                how="left"
-            )
+        return df_actual
 
-            if "Indicador" in df_actual.columns:
-                indicadors = df_actual["Indicador"].dropna().astype(str)
-                tot_nou = len(indicadors) > 0 and indicadors.eq("🆕 Nou").all()
+    # --- Excel ha canviat ---
+    # movem current → previous
+    if not df_curr.empty:
+        guardar(SNAPSHOT_PREV, df_curr)
+
+    # calculem comparant amb anterior
+    df_prev = carregar(SNAPSHOT_PREV)
+
+    if df_prev.empty:
+        df_actual["Indicador"] = "⚪ —"
+        df_actual["Mov. posició"] = "—"
+        df_actual["Canvi punts"] = 0.0
+    else:
+        df_prev["Participant"] = df_prev["Participant"].astype(str).str.strip()
+
+        df_actual = df_actual.merge(
+            df_prev,
+            on="Participant",
+            how="left",
+            suffixes=("", "_prev")
+        )
+
+        df_actual["Punts_prev"] = pd.to_numeric(df_actual["Punts_prev"], errors="coerce")
+        df_actual["Posició_prev"] = pd.to_numeric(df_actual["Posició_prev"], errors="coerce")
+
+        df_actual["Canvi punts"] = (df_actual["Punts"] - df_actual["Punts_prev"]).fillna(0).round(1)
+        df_actual["Canvi posició"] = (df_actual["Posició_prev"] - df_actual["Posició"]).fillna(0)
+
+        def indicador(row):
+            if pd.isna(row["Punts_prev"]):
+                return "⚪ —"
+
+            if row["Canvi punts"] > 0:
+                return "🟢 ▲"
+            elif row["Canvi punts"] < 0:
+                return "🔴 ▼"
             else:
-                tot_nou = True
+                return "⚪ —"
 
-            if tot_nou:
-                df_actual = posar_neutral(df_actual)
-                guardar_snapshot_actual(df_actual)
-                guardar_snapshot_display(df_actual)
-                guardar_meta_snapshot(excel_mtime)
-                return df_actual
+        def mov(row):
+            if pd.isna(row["Posició_prev"]):
+                return "—"
 
-            df_actual["Indicador"] = df_actual["Indicador"].fillna("⚪ —")
-            df_actual["Mov. posició"] = df_actual["Mov. posició"].fillna("—")
+            c = int(row["Canvi posició"])
 
-            df_actual["Canvi punts"] = pd.to_numeric(
-                df_actual["Canvi punts"],
-                errors="coerce"
-            ).fillna(0.0).round(1)
+            if c > 0:
+                return f"+{c}"
+            elif c < 0:
+                return str(c)
+            else:
+                return "—"
 
-            if "Canvi posició" not in df_actual.columns:
-                df_actual["Canvi posició"] = 0
+        df_actual["Indicador"] = df_actual.apply(indicador, axis=1)
+        df_actual["Mov. posició"] = df_actual.apply(mov, axis=1)
 
-            return df_actual
-
-        df_actual = posar_neutral(df_actual)
-        guardar_snapshot_actual(df_actual)
-        guardar_snapshot_display(df_actual)
-        guardar_meta_snapshot(excel_mtime)
-        return df_actual
-
-    # Si l'Excel ha canviat, comparem contra l'últim snapshot
-    df_prev = carregar_csv_segura(SNAPSHOT_CURRENT_FILE)
-
-    if df_prev.empty or "Participant" not in df_prev.columns:
-        df_actual = posar_neutral(df_actual)
-
-        guardar_snapshot_actual(df_actual)
-        guardar_snapshot_display(df_actual)
-        guardar_meta_snapshot(excel_mtime)
-
-        return df_actual
-
-    df_prev["Participant"] = df_prev["Participant"].astype(str).str.strip()
-
-    df_actual = df_actual.merge(
-        df_prev,
-        on="Participant",
-        how="left"
+    # guardem nou current
+    guardar(
+        SNAPSHOT_CURR,
+        df_actual[["Participant", "Punts", "Posició", "Indicador", "Mov. posició", "Canvi punts"]]
     )
 
-    df_actual["Punts anteriors"] = pd.to_numeric(
-        df_actual["Punts anteriors"],
-        errors="coerce"
-    )
-
-    df_actual["Posició anterior"] = pd.to_numeric(
-        df_actual["Posició anterior"],
-        errors="coerce"
-    )
-
-    df_actual["Canvi punts"] = (
-        df_actual["Punts"] - df_actual["Punts anteriors"]
-    ).round(1)
-
-    df_actual["Canvi punts"] = pd.to_numeric(
-        df_actual["Canvi punts"],
-        errors="coerce"
-    ).fillna(0.0).round(1)
-
-    df_actual["Canvi posició"] = (
-        df_actual["Posició anterior"] - df_actual["Posició"]
-    )
-
-    def indicador_punts(row):
-        if pd.isna(row.get("Punts anteriors")):
-            return "🆕"
-
-        if row["Canvi punts"] > 0:
-            return "🟢 ▲"
-        elif row["Canvi punts"] < 0:
-            return "🔴 ▼"
-        else:
-            return "⚪ —"
-
-    def moviment_posicio(row):
-        if pd.isna(row.get("Posició anterior")):
-            return "Nou"
-
-        canvi = int(row["Canvi posició"])
-
-        if canvi > 0:
-            return f"+{canvi}"
-        elif canvi < 0:
-            return str(canvi)
-        else:
-            return "—"
-
-    df_actual["Indicador"] = df_actual.apply(indicador_punts, axis=1)
-    df_actual["Mov. posició"] = df_actual.apply(moviment_posicio, axis=1)
-
-    guardar_snapshot_actual(df_actual)
-    guardar_snapshot_display(df_actual)
     guardar_meta_snapshot(excel_mtime)
 
     return df_actual
-
 
 # --------------------------------------------------
 # TAULES I GRÀFICS
