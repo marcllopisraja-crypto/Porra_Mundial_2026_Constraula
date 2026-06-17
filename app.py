@@ -201,7 +201,7 @@ def obtenir_data_actualitzacio_fitxer(path):
     timestamp = os.path.getmtime(path)
     dt = datetime.fromtimestamp(timestamp, tz=ZoneInfo("Europe/Madrid"))
 
-    return dt.strftime("%d/%m/%Y %H:%M")
+    return dt.strftime("%d/%m/%Y")
 
 
 def llista_valors_no_buits(df, columna):
