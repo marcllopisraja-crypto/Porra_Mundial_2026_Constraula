@@ -565,42 +565,40 @@ def aplicar_moviment(df_ranking, excel_mtime):
     return df_actual
 
 
-def aplicar_moviment_departament(df_dep_actual, df_ranking_global, departament):
+def aplicar_moviment_departament(df_dep_actual, departament):
     """
-    Calcula el canvi de posició dins d'un departament concret.
-    No fa servir la posició general.
+    Calcula el canvi de posició dins del departament seleccionat.
+    No mira la classificació general.
     """
     df_dep = df_dep_actual.copy()
 
-    if "Punts anteriors" not in df_ranking_global.columns:
+    df_prev = carregar_csv_segura(SNAPSHOT_CURRENT_FILE)
+
+    if df_prev.empty or "Participant" not in df_prev.columns or "Departament" not in df_prev.columns:
         df_dep["Canvi posició"] = "⚪ —"
         df_dep["Canvi punts"] = 0.0
         return df_dep
 
-    prev_base = df_ranking_global.copy()
+    df_prev = df_prev[
+        df_prev["Departament"].astype(str) == str(departament)
+    ].copy()
 
-    if "Departament" not in prev_base.columns:
+    if df_prev.empty or "Punts anteriors" not in df_prev.columns:
         df_dep["Canvi posició"] = "⚪ —"
         df_dep["Canvi punts"] = 0.0
         return df_dep
 
-    prev_dep = prev_base[
-        prev_base["Departament"].astype(str) == str(departament)
-    ][["Participant", "Punts anteriors"]].copy()
+    df_prev["Punts anteriors"] = pd.to_numeric(
+        df_prev["Punts anteriors"],
+        errors="coerce"
+    )
 
-    prev_dep["Punts anteriors"] = pd.to_numeric(prev_dep["Punts anteriors"], errors="coerce")
-    prev_dep = prev_dep.dropna(subset=["Punts anteriors"])
-
-    if prev_dep.empty:
-        df_dep["Canvi posició"] = "⚪ —"
-        df_dep["Canvi punts"] = 0.0
-        return df_dep
-
-    prev_dep = prev_dep.sort_values("Punts anteriors", ascending=False).reset_index(drop=True)
-    prev_dep["Posició anterior dep"] = prev_dep.index + 1
+    df_prev = df_prev.dropna(subset=["Punts anteriors"])
+    df_prev = df_prev.sort_values("Punts anteriors", ascending=False).reset_index(drop=True)
+    df_prev["Posició anterior dep"] = df_prev.index + 1
 
     df_dep = df_dep.merge(
-        prev_dep,
+        df_prev[["Participant", "Punts anteriors", "Posició anterior dep"]],
         on="Participant",
         how="left"
     )
@@ -1537,7 +1535,6 @@ if te_departaments:
         df_dep_individual = recalcular_posicions(df_dep_individual)
         df_dep_individual = aplicar_moviment_departament(
             df_dep_individual,
-            df_ranking,
             departament_sel
         )
 
