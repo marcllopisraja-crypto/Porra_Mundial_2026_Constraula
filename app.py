@@ -201,7 +201,7 @@ def obtenir_data_actualitzacio_fitxer(path):
     timestamp = os.path.getmtime(path)
     dt = datetime.fromtimestamp(timestamp, tz=ZoneInfo("Europe/Madrid"))
 
-    return dt.strftime("%d/%m/%Y")
+    return dt.strftime("%d/%m/%Y %H:%M")
 
 
 def llista_valors_no_buits(df, columna):
@@ -430,7 +430,12 @@ def carregar_csv_segura(path):
 
 
 def guardar_snapshot_actual(df_ranking):
-    df_snapshot = df_ranking[["Participant", "Punts", "Posició"]].copy()
+    cols = ["Participant", "Punts", "Posició"]
+
+    if "Departament" in df_ranking.columns:
+        cols.append("Departament")
+
+    df_snapshot = df_ranking[cols].copy()
     df_snapshot = df_snapshot.rename(columns={
         "Punts": "Punts anteriors",
         "Posició": "Posició anterior"
@@ -543,19 +548,13 @@ def aplicar_moviment(df_ranking, excel_mtime):
     def indicador_final(row):
         canvi_pos = int(row["Canvi num posició"])
 
-        # Prioritat visual: posició
+        # La columna "Canvi posició" NOMÉS mira posició, no punts.
         if canvi_pos > 0:
             return f"🟢 ▲ +{canvi_pos}"
         elif canvi_pos < 0:
             return f"🔴 ▼ {canvi_pos}"
-
-        # Si posició igual, mirar punts
-        if row["Canvi punts"] > 0:
-            return "🟢 ▲"
-        elif row["Canvi punts"] < 0:
-            return "🔴 ▼"
-
-        return "⚪ —"
+        else:
+            return "⚪ —"
 
     df_actual["Canvi posició"] = df_actual.apply(indicador_final, axis=1)
 
@@ -564,6 +563,72 @@ def aplicar_moviment(df_ranking, excel_mtime):
     guardar_meta_snapshot(excel_mtime)
 
     return df_actual
+
+
+def aplicar_moviment_departament(df_dep_actual, df_ranking_global, departament):
+    """
+    Calcula el canvi de posició dins d'un departament concret.
+    No fa servir la posició general.
+    """
+    df_dep = df_dep_actual.copy()
+
+    if "Punts anteriors" not in df_ranking_global.columns:
+        df_dep["Canvi posició"] = "⚪ —"
+        df_dep["Canvi punts"] = 0.0
+        return df_dep
+
+    prev_base = df_ranking_global.copy()
+
+    if "Departament" not in prev_base.columns:
+        df_dep["Canvi posició"] = "⚪ —"
+        df_dep["Canvi punts"] = 0.0
+        return df_dep
+
+    prev_dep = prev_base[
+        prev_base["Departament"].astype(str) == str(departament)
+    ][["Participant", "Punts anteriors"]].copy()
+
+    prev_dep["Punts anteriors"] = pd.to_numeric(prev_dep["Punts anteriors"], errors="coerce")
+    prev_dep = prev_dep.dropna(subset=["Punts anteriors"])
+
+    if prev_dep.empty:
+        df_dep["Canvi posició"] = "⚪ —"
+        df_dep["Canvi punts"] = 0.0
+        return df_dep
+
+    prev_dep = prev_dep.sort_values("Punts anteriors", ascending=False).reset_index(drop=True)
+    prev_dep["Posició anterior dep"] = prev_dep.index + 1
+
+    df_dep = df_dep.merge(
+        prev_dep,
+        on="Participant",
+        how="left"
+    )
+
+    df_dep["Punts anteriors"] = pd.to_numeric(df_dep["Punts anteriors"], errors="coerce")
+    df_dep["Posició anterior dep"] = pd.to_numeric(df_dep["Posició anterior dep"], errors="coerce")
+
+    df_dep["Canvi punts"] = (
+        df_dep["Punts"] - df_dep["Punts anteriors"]
+    ).fillna(0.0).round(1)
+
+    df_dep["Canvi num posició"] = (
+        df_dep["Posició anterior dep"] - df_dep["Posició"]
+    ).fillna(0).astype(int)
+
+    def indicador_dep(row):
+        canvi_pos = int(row["Canvi num posició"])
+
+        if canvi_pos > 0:
+            return f"🟢 ▲ +{canvi_pos}"
+        elif canvi_pos < 0:
+            return f"🔴 ▼ {canvi_pos}"
+        else:
+            return "⚪ —"
+
+    df_dep["Canvi posició"] = df_dep.apply(indicador_dep, axis=1)
+
+    return df_dep
 
 
 # --------------------------------------------------
@@ -1470,6 +1535,11 @@ if te_departaments:
     if departament_sel:
         df_dep_individual = df_ranking[df_ranking["Departament"] == departament_sel].copy()
         df_dep_individual = recalcular_posicions(df_dep_individual)
+        df_dep_individual = aplicar_moviment_departament(
+            df_dep_individual,
+            df_ranking,
+            departament_sel
+        )
 
         st.write(f"### 🥇 TOP 3 · {departament_sel}")
 
