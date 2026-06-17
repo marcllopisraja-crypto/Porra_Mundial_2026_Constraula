@@ -26,6 +26,21 @@ SNAPSHOT_META_FILE = "ranking_snapshot_meta.json"
 
 
 # --------------------------------------------------
+# BOTÓ RESET SNAPSHOT
+# --------------------------------------------------
+with st.sidebar:
+    if st.button("🔄 Reiniciar comparativa de moviments"):
+        for fitxer in [
+            SNAPSHOT_CURRENT_FILE,
+            SNAPSHOT_DISPLAY_FILE,
+            SNAPSHOT_META_FILE
+        ]:
+            if os.path.exists(fitxer):
+                os.remove(fitxer)
+        st.rerun()
+
+
+# --------------------------------------------------
 # BANDERES
 # --------------------------------------------------
 FLAGS = {
@@ -421,7 +436,9 @@ def guardar_snapshot_display(df_ranking):
     cols = [
         "Participant",
         "Indicador",
+        "Mov. posició",
         "Canvi punts",
+        "Canvi posició",
         "Punts anteriors",
         "Posició anterior"
     ]
@@ -435,10 +452,20 @@ def guardar_snapshot_display(df_ranking):
 def aplicar_moviment(df_ranking, excel_mtime):
     df_actual = df_ranking.copy()
 
+    def posar_neutral(df):
+        df = df.copy()
+        df["Posició anterior"] = df["Posició"]
+        df["Punts anteriors"] = df["Punts"]
+        df["Canvi punts"] = 0.0
+        df["Canvi posició"] = 0
+        df["Indicador"] = "⚪ —"
+        df["Mov. posició"] = "—"
+        return df
+
     meta = carregar_meta_snapshot()
     meta_mtime = meta.get("excel_mtime", None)
 
-    # Si l'Excel no ha canviat i ja tenim display guardat, recuperem el moviment guardat
+    # Si l'Excel no ha canviat, recuperem el moviment guardat
     if meta_mtime is not None and float(meta_mtime) == float(excel_mtime):
         df_mov = carregar_csv_segura(SNAPSHOT_DISPLAY_FILE)
 
@@ -449,25 +476,43 @@ def aplicar_moviment(df_ranking, excel_mtime):
                 how="left"
             )
 
-            if "Indicador" not in df_actual.columns:
-                df_actual["Indicador"] = "⚪ —"
+            if "Indicador" in df_actual.columns:
+                indicadors = df_actual["Indicador"].dropna().astype(str)
+                tot_nou = len(indicadors) > 0 and indicadors.eq("🆕 Nou").all()
+            else:
+                tot_nou = True
 
-            if "Canvi punts" not in df_actual.columns:
-                df_actual["Canvi punts"] = 0.0
+            if tot_nou:
+                df_actual = posar_neutral(df_actual)
+                guardar_snapshot_actual(df_actual)
+                guardar_snapshot_display(df_actual)
+                guardar_meta_snapshot(excel_mtime)
+                return df_actual
 
             df_actual["Indicador"] = df_actual["Indicador"].fillna("⚪ —")
-            df_actual["Canvi punts"] = pd.to_numeric(df_actual["Canvi punts"], errors="coerce").fillna(0.0).round(1)
+            df_actual["Mov. posició"] = df_actual["Mov. posició"].fillna("—")
+
+            df_actual["Canvi punts"] = pd.to_numeric(
+                df_actual["Canvi punts"],
+                errors="coerce"
+            ).fillna(0.0).round(1)
+
+            if "Canvi posició" not in df_actual.columns:
+                df_actual["Canvi posició"] = 0
 
             return df_actual
 
-    # Si l'Excel ha canviat, comparem contra l'últim snapshot actual
+        df_actual = posar_neutral(df_actual)
+        guardar_snapshot_actual(df_actual)
+        guardar_snapshot_display(df_actual)
+        guardar_meta_snapshot(excel_mtime)
+        return df_actual
+
+    # Si l'Excel ha canviat, comparem contra l'últim snapshot
     df_prev = carregar_csv_segura(SNAPSHOT_CURRENT_FILE)
 
     if df_prev.empty or "Participant" not in df_prev.columns:
-        df_actual["Posició anterior"] = pd.NA
-        df_actual["Punts anteriors"] = pd.NA
-        df_actual["Canvi punts"] = 0.0
-        df_actual["Indicador"] = "🆕 Nou"
+        df_actual = posar_neutral(df_actual)
 
         guardar_snapshot_actual(df_actual)
         guardar_snapshot_display(df_actual)
@@ -483,28 +528,55 @@ def aplicar_moviment(df_ranking, excel_mtime):
         how="left"
     )
 
+    df_actual["Punts anteriors"] = pd.to_numeric(
+        df_actual["Punts anteriors"],
+        errors="coerce"
+    )
+
+    df_actual["Posició anterior"] = pd.to_numeric(
+        df_actual["Posició anterior"],
+        errors="coerce"
+    )
+
     df_actual["Canvi punts"] = (
         df_actual["Punts"] - df_actual["Punts anteriors"]
     ).round(1)
 
-    df_actual["Canvi punts"] = pd.to_numeric(df_actual["Canvi punts"], errors="coerce").fillna(0.0).round(1)
+    df_actual["Canvi punts"] = pd.to_numeric(
+        df_actual["Canvi punts"],
+        errors="coerce"
+    ).fillna(0.0).round(1)
 
-    def calcular_indicador(row):
-        if pd.isna(row.get("Posició anterior")):
-            return "🆕 Nou"
+    df_actual["Canvi posició"] = (
+        df_actual["Posició anterior"] - df_actual["Posició"]
+    )
 
-        canvi_posicio = int(row["Posició anterior"] - row["Posició"])
+    def indicador_punts(row):
+        if pd.isna(row.get("Punts anteriors")):
+            return "🆕"
 
-        if canvi_posicio > 0:
-            return f"🟢 ▲ +{canvi_posicio}"
-        elif canvi_posicio < 0:
-            return f"🔴 ▼ {canvi_posicio}"
+        if row["Canvi punts"] > 0:
+            return "🟢 ▲"
+        elif row["Canvi punts"] < 0:
+            return "🔴 ▼"
         else:
-            if row["Canvi punts"] > 0:
-                return "⚪ +pts"
             return "⚪ —"
 
-    df_actual["Indicador"] = df_actual.apply(calcular_indicador, axis=1)
+    def moviment_posicio(row):
+        if pd.isna(row.get("Posició anterior")):
+            return "Nou"
+
+        canvi = int(row["Canvi posició"])
+
+        if canvi > 0:
+            return f"+{canvi}"
+        elif canvi < 0:
+            return str(canvi)
+        else:
+            return "—"
+
+    df_actual["Indicador"] = df_actual.apply(indicador_punts, axis=1)
+    df_actual["Mov. posició"] = df_actual.apply(moviment_posicio, axis=1)
 
     guardar_snapshot_actual(df_actual)
     guardar_snapshot_display(df_actual)
@@ -528,17 +600,20 @@ def mostrar_taula_ranking(df):
     if "Indicador" in df.columns:
         cols.append("Indicador")
 
+    if "Mov. posició" in df.columns:
+        cols.append("Mov. posició")
+
     cols.append("Participant")
 
     if "Departament" in df.columns:
         cols.append("Departament")
 
     cols.append("Punts")
+    cols.append("Dif líder")
 
+    # Canvi punts al final
     if "Canvi punts" in df.columns:
         cols.append("Canvi punts")
-
-    cols.append("Dif líder")
 
     cols_existents = [c for c in cols if c in df.columns]
 
@@ -553,7 +628,11 @@ def mostrar_taula_ranking(df):
     }
 
     if "Canvi punts" in df_display.columns:
-        df_display["Canvi punts"] = pd.to_numeric(df_display["Canvi punts"], errors="coerce").fillna(0.0).round(1)
+        df_display["Canvi punts"] = pd.to_numeric(
+            df_display["Canvi punts"],
+            errors="coerce"
+        ).fillna(0.0).round(1)
+
         format_dict["Canvi punts"] = "{:+.1f}"
 
     styled = (
@@ -570,7 +649,10 @@ def mostrar_taula_ranking(df):
     }
 
     if "Canvi punts" in df_display.columns:
-        column_config["Canvi punts"] = st.column_config.NumberColumn("Canvi punts", format="%+.1f")
+        column_config["Canvi punts"] = st.column_config.NumberColumn(
+            "Canvi punts",
+            format="%+.1f"
+        )
 
     st.dataframe(
         styled,
@@ -949,7 +1031,6 @@ data_actualitzacio = obtenir_data_actualitzacio_fitxer(EXCEL_FILE)
 
 df_porra, df_resultats = carregar_dades(EXCEL_FILE, excel_mtime)
 df_ranking = crear_ranking_des_de_porra(df_porra)
-
 df_ranking = aplicar_moviment(df_ranking, excel_mtime)
 
 df_departaments = crear_ranking_departaments(df_ranking)
@@ -1048,13 +1129,14 @@ for col, (medalla, classe, row) in zip([c1, c2, c3], top_cards):
         subtext = f"{row['Departament']}"
 
     indicador = row["Indicador"] if "Indicador" in row.index else ""
+    mov_pos = row["Mov. posició"] if "Mov. posició" in row.index else ""
 
     col.markdown(
         f"""
         <div class='card {classe}'>
             <h3>{medalla} {row["Participant"]}</h3>
             <h1>{float(row["Punts"]):.1f}</h1>
-            <p>{subtext} · {indicador}</p>
+            <p>{subtext} · {indicador} {mov_pos}</p>
         </div>
         """,
         unsafe_allow_html=True
@@ -1197,13 +1279,14 @@ if te_departaments:
 
         for i in range(min(3, len(dep_top))):
             indicador_dep = dep_top.iloc[i]["Indicador"] if "Indicador" in dep_top.columns else ""
+            mov_dep = dep_top.iloc[i]["Mov. posició"] if "Mov. posició" in dep_top.columns else ""
 
             dep_cols[i].markdown(
                 f"""
                 <div class='card {classes[i]}'>
                     <h3>{medalles[i]} {dep_top.iloc[i]["Participant"]}</h3>
                     <h1>{float(dep_top.iloc[i]["Punts"]):.1f}</h1>
-                    <p>{departament_sel} · {indicador_dep}</p>
+                    <p>{departament_sel} · {indicador_dep} {mov_dep}</p>
                 </div>
                 """,
                 unsafe_allow_html=True
