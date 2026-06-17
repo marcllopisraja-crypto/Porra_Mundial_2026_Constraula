@@ -5,6 +5,7 @@ import base64
 import os
 import json
 import unicodedata
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -31,7 +32,7 @@ HISTORY_FILE = "ranking_history.csv"
 # --------------------------------------------------
 with st.sidebar:
     st.write("### ⚙️ Gestió")
-    
+
     if st.button("🔄 Reiniciar comparativa de moviments"):
         for fitxer in [
             SNAPSHOT_CURRENT_FILE,
@@ -395,7 +396,7 @@ def crear_ranking_departaments(df_ranking):
 
 
 # --------------------------------------------------
-# SNAPSHOT / MOVIMENT AUTOMÀTIC PER VERSIÓ EXCEL
+# SNAPSHOT / MOVIMENT ENTRE VERSIONS D'EXCEL
 # --------------------------------------------------
 def carregar_meta_snapshot():
     if not os.path.exists(SNAPSHOT_META_FILE):
@@ -441,16 +442,14 @@ def guardar_snapshot_actual(df_ranking):
 def guardar_snapshot_display(df_ranking):
     cols = [
         "Participant",
-        "Indicador",
-        "Mov. posició",
-        "Canvi punts",
         "Canvi posició",
+        "Canvi punts",
+        "Canvi num posició",
         "Punts anteriors",
         "Posició anterior"
     ]
 
     cols_existents = [c for c in cols if c in df_ranking.columns]
-
     df_display = df_ranking[cols_existents].copy()
     df_display.to_csv(SNAPSHOT_DISPLAY_FILE, index=False)
 
@@ -463,9 +462,8 @@ def aplicar_moviment(df_ranking, excel_mtime):
         df["Posició anterior"] = df["Posició"]
         df["Punts anteriors"] = df["Punts"]
         df["Canvi punts"] = 0.0
-        df["Canvi posició"] = 0
-        df["Indicador"] = "⚪ —"
-        df["Mov. posició"] = "—"
+        df["Canvi num posició"] = 0
+        df["Canvi posició"] = "⚪ —"
         return df
 
     meta = carregar_meta_snapshot()
@@ -482,16 +480,14 @@ def aplicar_moviment(df_ranking, excel_mtime):
                 how="left"
             )
 
-            df_actual["Indicador"] = df_actual["Indicador"].fillna("⚪ —")
-            df_actual["Mov. posició"] = df_actual["Mov. posició"].fillna("—")
-
+            df_actual["Canvi posició"] = df_actual["Canvi posició"].fillna("⚪ —")
             df_actual["Canvi punts"] = pd.to_numeric(
                 df_actual["Canvi punts"],
                 errors="coerce"
             ).fillna(0.0).round(1)
 
-            if "Canvi posició" not in df_actual.columns:
-                df_actual["Canvi posició"] = 0
+            if "Canvi num posició" not in df_actual.columns:
+                df_actual["Canvi num posició"] = 0
 
             return df_actual
 
@@ -540,36 +536,28 @@ def aplicar_moviment(df_ranking, excel_mtime):
         errors="coerce"
     ).fillna(0.0).round(1)
 
-    df_actual["Canvi posició"] = (
+    df_actual["Canvi num posició"] = (
         df_actual["Posició anterior"] - df_actual["Posició"]
-    )
+    ).fillna(0).astype(int)
 
-    def indicador_punts(row):
-        if pd.isna(row.get("Punts anteriors")):
-            return "⚪ —"
+    def indicador_final(row):
+        canvi_pos = int(row["Canvi num posició"])
 
+        # Prioritat visual: posició
+        if canvi_pos > 0:
+            return f"🟢 ▲ +{canvi_pos}"
+        elif canvi_pos < 0:
+            return f"🔴 ▼ {canvi_pos}"
+
+        # Si posició igual, mirar punts
         if row["Canvi punts"] > 0:
             return "🟢 ▲"
         elif row["Canvi punts"] < 0:
             return "🔴 ▼"
-        else:
-            return "⚪ —"
 
-    def moviment_posicio(row):
-        if pd.isna(row.get("Posició anterior")):
-            return "—"
+        return "⚪ —"
 
-        canvi = int(row["Canvi posició"])
-
-        if canvi > 0:
-            return f"+{canvi}"
-        elif canvi < 0:
-            return str(canvi)
-        else:
-            return "—"
-
-    df_actual["Indicador"] = df_actual.apply(indicador_punts, axis=1)
-    df_actual["Mov. posició"] = df_actual.apply(moviment_posicio, axis=1)
+    df_actual["Canvi posició"] = df_actual.apply(indicador_final, axis=1)
 
     guardar_snapshot_actual(df_actual)
     guardar_snapshot_display(df_actual)
@@ -586,8 +574,7 @@ def carregar_historic():
         return pd.DataFrame()
 
     try:
-        df_hist = pd.read_csv(HISTORY_FILE)
-        return df_hist
+        return pd.read_csv(HISTORY_FILE)
     except Exception:
         return pd.DataFrame()
 
@@ -600,7 +587,11 @@ def registrar_historic(df_ranking, excel_mtime, data_actualitzacio):
     df_hist = carregar_historic()
 
     if not df_hist.empty and "excel_mtime" in df_hist.columns:
-        mtimes = pd.to_numeric(df_hist["excel_mtime"], errors="coerce").dropna().astype(float).unique()
+        mtimes = pd.to_numeric(
+            df_hist["excel_mtime"],
+            errors="coerce"
+        ).dropna().astype(float).unique()
+
         if float(excel_mtime) in mtimes:
             return df_hist
 
@@ -628,12 +619,10 @@ def mostrar_evolucio_temporal(df_hist, df_ranking):
     st.subheader("📉 Evolució temporal")
 
     if df_hist.empty or "Actualització" not in df_hist.columns:
-        st.info("Encara no hi ha històric suficient. L’evolució es començarà a veure quan pugis noves versions de l’Excel.")
+        st.info("Encara no hi ha històric suficient. Quan pugis noves versions de l’Excel, es veurà l’evolució.")
         return
 
-    versions = df_hist["Actualització"].dropna().astype(str).unique()
-
-    if len(versions) < 2:
+    if df_hist["Actualització"].nunique() < 2:
         st.info("Encara només hi ha una versió registrada. Quan pugis una nova versió de l’Excel, es veurà l’evolució.")
         return
 
@@ -653,8 +642,9 @@ def mostrar_evolucio_temporal(df_hist, df_ranking):
     df_evo["Punts"] = pd.to_numeric(df_evo["Punts"], errors="coerce")
     df_evo["Posició"] = pd.to_numeric(df_evo["Posició"], errors="coerce")
     df_evo["Ordre versió"] = pd.to_numeric(df_evo["excel_mtime"], errors="coerce")
-
     df_evo = df_evo.sort_values(["Ordre versió", "Participant"])
+
+    ordre_actualitzacions = list(df_evo["Actualització"].drop_duplicates())
 
     st.write("### 📈 Evolució de punts")
 
@@ -662,7 +652,7 @@ def mostrar_evolucio_temporal(df_hist, df_ranking):
         alt.Chart(df_evo)
         .mark_line(point=True)
         .encode(
-            x=alt.X("Actualització:N", title="Versió Excel", sort=list(df_evo["Actualització"].unique())),
+            x=alt.X("Actualització:N", title="Versió Excel", sort=ordre_actualitzacions),
             y=alt.Y("Punts:Q", title="Punts"),
             color=alt.Color("Participant:N", title="Participant"),
             tooltip=[
@@ -683,11 +673,10 @@ def mostrar_evolucio_temporal(df_hist, df_ranking):
         alt.Chart(df_evo)
         .mark_line(point=True)
         .encode(
-            x=alt.X("Actualització:N", title="Versió Excel", sort=list(df_evo["Actualització"].unique())),
+            x=alt.X("Actualització:N", title="Versió Excel", sort=ordre_actualitzacions),
             y=alt.Y(
                 "Posició:Q",
                 title="Posició",
-                sort="ascending",
                 scale=alt.Scale(reverse=True)
             ),
             color=alt.Color("Participant:N", title="Participant"),
@@ -704,6 +693,93 @@ def mostrar_evolucio_temporal(df_hist, df_ranking):
     st.altair_chart(chart_pos, use_container_width=True)
 
 
+def mostrar_animacio_evolucio(df_hist):
+    st.subheader("📽️ Animació evolució del rànquing")
+
+    if df_hist.empty or "Actualització" not in df_hist.columns:
+        st.info("Encara no hi ha històric suficient per animar.")
+        return
+
+    if df_hist["Actualització"].nunique() < 2:
+        st.info("Calen almenys dues versions d’Excel per reproduir l’animació.")
+        return
+
+    max_pos = st.slider(
+        "Nombre de posicions a mostrar a l’animació",
+        min_value=5,
+        max_value=20,
+        value=10,
+        step=1
+    )
+
+    velocitat = st.slider(
+        "Velocitat de reproducció",
+        min_value=0.3,
+        max_value=2.0,
+        value=0.9,
+        step=0.1
+    )
+
+    if st.button("▶️ Reproduir evolució"):
+        df_anim = df_hist.copy()
+        df_anim["excel_mtime"] = pd.to_numeric(df_anim["excel_mtime"], errors="coerce")
+        df_anim["Posició"] = pd.to_numeric(df_anim["Posició"], errors="coerce")
+        df_anim["Punts"] = pd.to_numeric(df_anim["Punts"], errors="coerce")
+
+        versions = (
+            df_anim[["excel_mtime", "Actualització"]]
+            .drop_duplicates()
+            .sort_values("excel_mtime")
+        )
+
+        placeholder = st.empty()
+
+        for _, versio in versions.iterrows():
+            data_versio = versio["Actualització"]
+            mtime_versio = versio["excel_mtime"]
+
+            frame = (
+                df_anim[df_anim["excel_mtime"] == mtime_versio]
+                .sort_values("Posició")
+                .head(max_pos)
+                [["Posició", "Participant", "Punts"]]
+                .copy()
+            )
+
+            frame["Punts"] = frame["Punts"].round(1)
+
+            with placeholder.container():
+                st.write(f"### 🕒 Versió: {data_versio}")
+                st.dataframe(
+                    frame,
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+                chart = (
+                    alt.Chart(frame)
+                    .mark_bar(color="#0b70c9")
+                    .encode(
+                        x=alt.X("Punts:Q", title="Punts"),
+                        y=alt.Y(
+                            "Participant:N",
+                            sort="-x",
+                            title=None
+                        ),
+                        tooltip=[
+                            alt.Tooltip("Posició:Q", title="Posició"),
+                            alt.Tooltip("Participant:N", title="Participant"),
+                            alt.Tooltip("Punts:Q", title="Punts", format=".1f")
+                        ]
+                    )
+                    .properties(height=max(300, len(frame) * 32))
+                )
+
+                st.altair_chart(chart, use_container_width=True)
+
+            time.sleep(velocitat)
+
+
 # --------------------------------------------------
 # TAULES I GRÀFICS
 # --------------------------------------------------
@@ -716,11 +792,8 @@ def highlight_leader(row):
 def mostrar_taula_ranking(df):
     cols = ["Posició"]
 
-    if "Indicador" in df.columns:
-        cols.append("Indicador")
-
-    if "Mov. posició" in df.columns:
-        cols.append("Mov. posició")
+    if "Canvi posició" in df.columns:
+        cols.append("Canvi posició")
 
     cols.append("Participant")
 
@@ -734,7 +807,6 @@ def mostrar_taula_ranking(df):
         cols.append("Canvi punts")
 
     cols_existents = [c for c in cols if c in df.columns]
-
     df_display = df[cols_existents].copy()
 
     df_display["Punts"] = df_display["Punts"].astype(float).round(1)
@@ -765,6 +837,9 @@ def mostrar_taula_ranking(df):
         "Punts": st.column_config.NumberColumn("Punts", format="%.1f"),
         "Dif líder": st.column_config.NumberColumn("Dif líder", format="%.1f"),
     }
+
+    if "Canvi posició" in df_display.columns:
+        column_config["Canvi posició"] = st.column_config.TextColumn("Canvi posició")
 
     if "Canvi punts" in df_display.columns:
         column_config["Canvi punts"] = st.column_config.NumberColumn(
@@ -1149,8 +1224,8 @@ data_actualitzacio = obtenir_data_actualitzacio_fitxer(EXCEL_FILE)
 
 df_porra, df_resultats = carregar_dades(EXCEL_FILE, excel_mtime)
 df_ranking = crear_ranking_des_de_porra(df_porra)
-df_ranking = aplicar_moviment(df_ranking, excel_mtime)
 
+df_ranking = aplicar_moviment(df_ranking, excel_mtime)
 df_historic = registrar_historic(df_ranking, excel_mtime, data_actualitzacio)
 
 df_departaments = crear_ranking_departaments(df_ranking)
@@ -1248,15 +1323,14 @@ for col, (medalla, classe, row) in zip([c1, c2, c3], top_cards):
     if "Departament" in row.index:
         subtext = f"{row['Departament']}"
 
-    indicador = row["Indicador"] if "Indicador" in row.index else ""
-    mov_pos = row["Mov. posició"] if "Mov. posició" in row.index else ""
+    canvi_pos = row["Canvi posició"] if "Canvi posició" in row.index else ""
 
     col.markdown(
         f"""
         <div class='card {classe}'>
             <h3>{medalla} {row["Participant"]}</h3>
             <h1>{float(row["Punts"]):.1f}</h1>
-            <p>{subtext} · {indicador} {mov_pos}</p>
+            <p>{subtext} · {canvi_pos}</p>
         </div>
         """,
         unsafe_allow_html=True
@@ -1281,6 +1355,7 @@ mostrar_grafic_punts(df_ranking, color="#0b70c9", altura_minima=1000)
 # EVOLUCIÓ TEMPORAL
 # --------------------------------------------------
 mostrar_evolucio_temporal(df_historic, df_ranking)
+mostrar_animacio_evolucio(df_historic)
 
 
 # --------------------------------------------------
@@ -1404,15 +1479,14 @@ if te_departaments:
         classes = ["gold", "silver", "bronze"]
 
         for i in range(min(3, len(dep_top))):
-            indicador_dep = dep_top.iloc[i]["Indicador"] if "Indicador" in dep_top.columns else ""
-            mov_dep = dep_top.iloc[i]["Mov. posició"] if "Mov. posició" in dep_top.columns else ""
+            canvi_dep = dep_top.iloc[i]["Canvi posició"] if "Canvi posició" in dep_top.columns else ""
 
             dep_cols[i].markdown(
                 f"""
                 <div class='card {classes[i]}'>
                     <h3>{medalles[i]} {dep_top.iloc[i]["Participant"]}</h3>
                     <h1>{float(dep_top.iloc[i]["Punts"]):.1f}</h1>
-                    <p>{departament_sel} · {indicador_dep} {mov_dep}</p>
+                    <p>{departament_sel} · {canvi_dep}</p>
                 </div>
                 """,
                 unsafe_allow_html=True
