@@ -474,7 +474,6 @@ def aplicar_moviment(df_ranking, excel_mtime):
     meta = carregar_meta_snapshot()
     meta_mtime = meta.get("excel_mtime", None)
 
-    # Si l'Excel NO ha canviat, recuperem el mateix moviment guardat
     if meta_mtime is not None and float(meta_mtime) == float(excel_mtime):
         df_mov = carregar_csv_segura(SNAPSHOT_DISPLAY_FILE)
 
@@ -502,7 +501,6 @@ def aplicar_moviment(df_ranking, excel_mtime):
         guardar_meta_snapshot(excel_mtime)
         return df_actual
 
-    # Si l'Excel SÍ ha canviat, comparem contra l'última versió d'Excel guardada
     df_prev = carregar_csv_segura(SNAPSHOT_CURRENT_FILE)
 
     if df_prev.empty or "Participant" not in df_prev.columns:
@@ -548,7 +546,6 @@ def aplicar_moviment(df_ranking, excel_mtime):
     def indicador_final(row):
         canvi_pos = int(row["Canvi num posició"])
 
-        # La columna "Canvi posició" NOMÉS mira posició, no punts.
         if canvi_pos > 0:
             return f"🟢 ▲ +{canvi_pos}"
         elif canvi_pos < 0:
@@ -565,49 +562,94 @@ def aplicar_moviment(df_ranking, excel_mtime):
     return df_actual
 
 
-def aplicar_moviment_departament(df_dep_actual, departament):
+def aplicar_moviment_departament(df_dep_actual, df_ranking_global, departament):
     """
     Calcula el canvi de posició dins del departament seleccionat.
-    No mira la classificació general.
+    Usa les columnes 'Punts anteriors' de df_ranking_global, és a dir,
+    la versió anterior de l'Excel ja carregada a la classificació general.
     """
+
     df_dep = df_dep_actual.copy()
 
-    df_prev = carregar_csv_segura(SNAPSHOT_CURRENT_FILE)
+    columnes_a_netejar = [
+        "Punts anteriors",
+        "Posició anterior",
+        "Punts anteriors dep",
+        "Posició anterior dep",
+        "Canvi punts",
+        "Canvi num posició",
+        "Canvi posició"
+    ]
 
-    if df_prev.empty or "Participant" not in df_prev.columns or "Departament" not in df_prev.columns:
+    for col in columnes_a_netejar:
+        if col in df_dep.columns:
+            df_dep = df_dep.drop(columns=[col])
+
+    if "Punts anteriors" not in df_ranking_global.columns:
         df_dep["Canvi posició"] = "⚪ —"
         df_dep["Canvi punts"] = 0.0
         return df_dep
 
-    df_prev = df_prev[
-        df_prev["Departament"].astype(str) == str(departament)
+    if "Departament" not in df_ranking_global.columns:
+        df_dep["Canvi posició"] = "⚪ —"
+        df_dep["Canvi punts"] = 0.0
+        return df_dep
+
+    df_prev_dep = df_ranking_global[
+        df_ranking_global["Departament"].astype(str).str.strip() == str(departament).strip()
     ].copy()
 
-    if df_prev.empty or "Punts anteriors" not in df_prev.columns:
+    if df_prev_dep.empty:
         df_dep["Canvi posició"] = "⚪ —"
         df_dep["Canvi punts"] = 0.0
         return df_dep
 
-    df_prev["Punts anteriors"] = pd.to_numeric(
-        df_prev["Punts anteriors"],
+    df_prev_dep["Punts anteriors"] = pd.to_numeric(
+        df_prev_dep["Punts anteriors"],
         errors="coerce"
     )
 
-    df_prev = df_prev.dropna(subset=["Punts anteriors"])
-    df_prev = df_prev.sort_values("Punts anteriors", ascending=False).reset_index(drop=True)
-    df_prev["Posició anterior dep"] = df_prev.index + 1
+    df_prev_dep = df_prev_dep.dropna(subset=["Punts anteriors"])
+
+    if df_prev_dep.empty:
+        df_dep["Canvi posició"] = "⚪ —"
+        df_dep["Canvi punts"] = 0.0
+        return df_dep
+
+    df_prev_dep = (
+        df_prev_dep
+        .sort_values("Punts anteriors", ascending=False)
+        .reset_index(drop=True)
+    )
+
+    df_prev_dep["Posició anterior dep"] = df_prev_dep.index + 1
+
+    df_prev_dep = df_prev_dep[
+        ["Participant", "Punts anteriors", "Posició anterior dep"]
+    ].copy()
+
+    df_prev_dep = df_prev_dep.rename(columns={
+        "Punts anteriors": "Punts anteriors dep"
+    })
 
     df_dep = df_dep.merge(
-        df_prev[["Participant", "Punts anteriors", "Posició anterior dep"]],
+        df_prev_dep,
         on="Participant",
         how="left"
     )
 
-    df_dep["Punts anteriors"] = pd.to_numeric(df_dep["Punts anteriors"], errors="coerce")
-    df_dep["Posició anterior dep"] = pd.to_numeric(df_dep["Posició anterior dep"], errors="coerce")
+    df_dep["Punts anteriors dep"] = pd.to_numeric(
+        df_dep["Punts anteriors dep"],
+        errors="coerce"
+    )
+
+    df_dep["Posició anterior dep"] = pd.to_numeric(
+        df_dep["Posició anterior dep"],
+        errors="coerce"
+    )
 
     df_dep["Canvi punts"] = (
-        df_dep["Punts"] - df_dep["Punts anteriors"]
+        df_dep["Punts"] - df_dep["Punts anteriors dep"]
     ).fillna(0.0).round(1)
 
     df_dep["Canvi num posició"] = (
@@ -1533,8 +1575,10 @@ if te_departaments:
     if departament_sel:
         df_dep_individual = df_ranking[df_ranking["Departament"] == departament_sel].copy()
         df_dep_individual = recalcular_posicions(df_dep_individual)
+
         df_dep_individual = aplicar_moviment_departament(
             df_dep_individual,
+            df_ranking,
             departament_sel
         )
 
