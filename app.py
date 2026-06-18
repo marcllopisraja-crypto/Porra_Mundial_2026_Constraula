@@ -1166,7 +1166,7 @@ img_base64 = carregar_imatge_base64(BACKGROUND_IMAGE)
 if img_base64:
     background_css = f"""
     background-image:
-        linear-gradient(rgba(0,0,0,0.52), rgba(0,0,0,0.72)),
+        linear-gradient(rgba(0,0,0,0.20), rgba(0,0,0,0.40)),
         url("data:image/jpg;base64,{img_base64}");
     background-size: cover;
     background-position: center;
