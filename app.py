@@ -1185,7 +1185,6 @@ st.markdown(
     .block-container {{
         padding-top: 2rem;
         padding-bottom: 2rem;
-        background: rgba(255,255,255,0.92);
         border-radius: 24px;
         margin-top: 24px;
         margin-bottom: 24px;
