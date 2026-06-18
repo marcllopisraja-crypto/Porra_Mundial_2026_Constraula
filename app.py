@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 # CONFIGURACIÓ GENERAL
 # --------------------------------------------------
 st.set_page_config(
-    page_title="Porra Mundial",
+    page_title="Porra Mundial 2026",
     layout="wide"
 )
 
@@ -28,7 +28,7 @@ HISTORY_FILE = "ranking_history.csv"
 
 
 # --------------------------------------------------
-# BOTONS SIDEBAR
+# SIDEBAR
 # --------------------------------------------------
 with st.sidebar:
     st.write("### ⚙️ Gestió")
@@ -48,6 +48,9 @@ with st.sidebar:
             os.remove(HISTORY_FILE)
         st.rerun()
 
+    st.markdown("---")
+    st.caption("Els moviments es calculen comparant versions diferents de l’Excel.")
+
 
 # --------------------------------------------------
 # BANDERES
@@ -63,6 +66,7 @@ FLAGS = {
     "marroc": "🇲🇦",
     "brasil": "🇧🇷",
     "estats units": "🇺🇸",
+    "eeuu": "🇺🇸",
     "ee.uu": "🇺🇸",
     "australia": "🇦🇺",
     "turquia": "🇹🇷",
@@ -94,27 +98,20 @@ FLAGS = {
     "egipte": "🇪🇬",
     "noruega": "🇳🇴",
     "colombia": "🇨🇴",
-    "colòmbia": "🇨🇴",
     "bosnia i hercegovina": "🇧🇦",
     "paraguai": "🇵🇾",
     "tunisia": "🇹🇳",
-    "tunísia": "🇹🇳",
     "cap verd": "🇨🇻",
     "jordania": "🇯🇴",
-    "jordània": "🇯🇴",
     "panama": "🇵🇦",
-    "panamà": "🇵🇦",
-    "curaçao": "🇨🇼",
     "curacao": "🇨🇼",
     "haiti": "🇭🇹",
-    "haití": "🇭🇹",
-    "sud-africa": "🇿🇦",
-    "sud-àfrica": "🇿🇦"
+    "sud-africa": "🇿🇦"
 }
 
 
 # --------------------------------------------------
-# FUNCIONS CACHEJADES
+# FUNCIONS DE CARREGA
 # --------------------------------------------------
 @st.cache_data(show_spinner=False)
 def carregar_dades(excel_file, file_mtime):
@@ -138,8 +135,8 @@ def carregar_imatge_base64(image_path):
     if not os.path.exists(image_path):
         return None
 
-    with open(image_path, "rb") as image_file:
-        return base64.b64encode(image_file.read()).decode()
+    with open(image_path, "rb") as f:
+        return base64.b64encode(f.read()).decode()
 
 
 # --------------------------------------------------
@@ -201,7 +198,15 @@ def obtenir_data_actualitzacio_fitxer(path):
     timestamp = os.path.getmtime(path)
     dt = datetime.fromtimestamp(timestamp, tz=ZoneInfo("Europe/Madrid"))
 
-    return dt.strftime("%d/%m/%Y")
+    return dt.strftime("%d/%m/%Y %H:%M")
+
+
+def preparar_taula_buida(df):
+    df = df.copy()
+    df = df.dropna(how="all")
+    df = df.dropna(axis=1, how="all")
+    df = df.fillna("")
+    return df
 
 
 def llista_valors_no_buits(df, columna):
@@ -254,14 +259,6 @@ def primer_valor_o_pendent(df, columna):
     return valors[0]
 
 
-def preparar_taula_buida(df):
-    df = df.copy()
-    df = df.dropna(how="all")
-    df = df.dropna(axis=1, how="all")
-    df = df.fillna("")
-    return df
-
-
 def trobar_col_resultat_final_porra(df_porra):
     for col in df_porra.columns:
         if col.strip() == "Resultat final":
@@ -275,6 +272,9 @@ def trobar_col_resultat_final_porra(df_porra):
     return None
 
 
+# --------------------------------------------------
+# RÀNQUINGS
+# --------------------------------------------------
 def recalcular_posicions(df):
     df = df.copy()
     df = df.sort_values("Punts", ascending=False).reset_index(drop=True)
@@ -396,7 +396,7 @@ def crear_ranking_departaments(df_ranking):
 
 
 # --------------------------------------------------
-# SNAPSHOT / MOVIMENT ENTRE VERSIONS D'EXCEL
+# SNAPSHOTS I MOVIMENTS
 # --------------------------------------------------
 def carregar_meta_snapshot():
     if not os.path.exists(SNAPSHOT_META_FILE):
@@ -478,11 +478,7 @@ def aplicar_moviment(df_ranking, excel_mtime):
         df_mov = carregar_csv_segura(SNAPSHOT_DISPLAY_FILE)
 
         if not df_mov.empty and "Participant" in df_mov.columns:
-            df_actual = df_actual.merge(
-                df_mov,
-                on="Participant",
-                how="left"
-            )
+            df_actual = df_actual.merge(df_mov, on="Participant", how="left")
 
             df_actual["Canvi posició"] = df_actual["Canvi posició"].fillna("⚪ —")
             df_actual["Canvi punts"] = pd.to_numeric(
@@ -505,20 +501,14 @@ def aplicar_moviment(df_ranking, excel_mtime):
 
     if df_prev.empty or "Participant" not in df_prev.columns:
         df_actual = posar_neutral(df_actual)
-
         guardar_snapshot_actual(df_actual)
         guardar_snapshot_display(df_actual)
         guardar_meta_snapshot(excel_mtime)
-
         return df_actual
 
     df_prev["Participant"] = df_prev["Participant"].astype(str).str.strip()
 
-    df_actual = df_actual.merge(
-        df_prev,
-        on="Participant",
-        how="left"
-    )
+    df_actual = df_actual.merge(df_prev, on="Participant", how="left")
 
     df_actual["Punts anteriors"] = pd.to_numeric(
         df_actual["Punts anteriors"],
@@ -563,12 +553,6 @@ def aplicar_moviment(df_ranking, excel_mtime):
 
 
 def aplicar_moviment_departament(df_dep_actual, df_ranking_global, departament):
-    """
-    Calcula el canvi de posició dins del departament seleccionat.
-    Usa les columnes 'Punts anteriors' de df_ranking_global, és a dir,
-    la versió anterior de l'Excel ja carregada a la classificació general.
-    """
-
     df_dep = df_dep_actual.copy()
 
     columnes_a_netejar = [
@@ -616,12 +600,7 @@ def aplicar_moviment_departament(df_dep_actual, df_ranking_global, departament):
         df_dep["Canvi punts"] = 0.0
         return df_dep
 
-    df_prev_dep = (
-        df_prev_dep
-        .sort_values("Punts anteriors", ascending=False)
-        .reset_index(drop=True)
-    )
-
+    df_prev_dep = df_prev_dep.sort_values("Punts anteriors", ascending=False).reset_index(drop=True)
     df_prev_dep["Posició anterior dep"] = df_prev_dep.index + 1
 
     df_prev_dep = df_prev_dep[
@@ -672,7 +651,7 @@ def aplicar_moviment_departament(df_dep_actual, df_ranking_global, departament):
 
 
 # --------------------------------------------------
-# HISTÒRIC D'EVOLUCIÓ TEMPORAL
+# HISTÒRIC I ANIMACIONS
 # --------------------------------------------------
 def carregar_historic():
     if not os.path.exists(HISTORY_FILE):
@@ -706,7 +685,6 @@ def registrar_historic(df_ranking, excel_mtime, data_actualitzacio):
         cols.append("Departament")
 
     df_nou = df_ranking[cols].copy()
-
     df_nou["excel_mtime"] = float(excel_mtime)
     df_nou["Actualització"] = str(data_actualitzacio)
 
@@ -866,11 +844,7 @@ def mostrar_animacio_evolucio(df_hist):
                     .mark_bar(color="#0b70c9")
                     .encode(
                         x=alt.X("Punts:Q", title="Punts"),
-                        y=alt.Y(
-                            "Participant:N",
-                            sort="-x",
-                            title=None
-                        ),
+                        y=alt.Y("Participant:N", sort="-x", title=None),
                         tooltip=[
                             alt.Tooltip("Posició:Q", title="Posició"),
                             alt.Tooltip("Participant:N", title="Participant"),
@@ -980,15 +954,7 @@ def mostrar_taula_departaments(df_dep):
     st.dataframe(
         styled,
         use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Posició": st.column_config.NumberColumn("Posició", format="%d"),
-            "Participants": st.column_config.NumberColumn("Participants", format="%d"),
-            "Mitjana_punts": st.column_config.NumberColumn("Mitjana punts", format="%.1f"),
-            "Punts_totals": st.column_config.NumberColumn("Punts totals", format="%.1f"),
-            "Millor_puntuacio": st.column_config.NumberColumn("Millor puntuació", format="%.1f"),
-            "Dif líder": st.column_config.NumberColumn("Dif líder", format="%.1f"),
-        }
+        hide_index=True
     )
 
 
@@ -1002,17 +968,8 @@ def mostrar_grafic_punts(df, color="#0b70c9", altura_minima=950):
         alt.Chart(chart_data)
         .mark_bar(color=color)
         .encode(
-            x=alt.X(
-                "Punts:Q",
-                title="Punts",
-                scale=alt.Scale(zero=False)
-            ),
-            y=alt.Y(
-                "Participant:N",
-                sort="-x",
-                title=None,
-                axis=alt.Axis(labelLimit=560, labelFontSize=12)
-            ),
+            x=alt.X("Punts:Q", title="Punts", scale=alt.Scale(zero=False)),
+            y=alt.Y("Participant:N", sort="-x", title=None, axis=alt.Axis(labelLimit=560, labelFontSize=12)),
             tooltip=[
                 alt.Tooltip("Posició:Q", title="Posició"),
                 alt.Tooltip("Participant:N", title="Participant"),
@@ -1037,17 +994,8 @@ def mostrar_grafic_departaments(df_dep):
         alt.Chart(chart_data)
         .mark_bar(color="#0f9d58")
         .encode(
-            x=alt.X(
-                "Mitjana_punts:Q",
-                title="Mitjana de punts",
-                scale=alt.Scale(zero=False)
-            ),
-            y=alt.Y(
-                "Departament:N",
-                sort="-x",
-                title=None,
-                axis=alt.Axis(labelLimit=560, labelFontSize=13)
-            ),
+            x=alt.X("Mitjana_punts:Q", title="Mitjana de punts", scale=alt.Scale(zero=False)),
+            y=alt.Y("Departament:N", sort="-x", title=None, axis=alt.Axis(labelLimit=560, labelFontSize=13)),
             tooltip=[
                 alt.Tooltip("Posició:Q", title="Posició"),
                 alt.Tooltip("Departament:N", title="Departament"),
@@ -1063,6 +1011,9 @@ def mostrar_grafic_departaments(df_dep):
     st.altair_chart(chart, use_container_width=True)
 
 
+# --------------------------------------------------
+# RESULTATS REALS
+# --------------------------------------------------
 def obtenir_pichichi_real(df_resultats_display, col_pichichi, col_gols):
     if col_pichichi not in df_resultats_display.columns or col_gols not in df_resultats_display.columns:
         return "Pendent", "Pendent"
@@ -1159,15 +1110,15 @@ def mostrar_prediccions_eliminatoria_participant(df_j):
 
 
 # --------------------------------------------------
-# ESTILS + FONS
+# ESTILS V5
 # --------------------------------------------------
 img_base64 = carregar_imatge_base64(BACKGROUND_IMAGE)
 
 if img_base64:
     background_css = f"""
     background-image:
-             linear-gradient(rgba(0,0,0,0.25), rgba(0,0,0,0.45)),
-             url("data:image/jpg;base64,{img_base64}");
+        linear-gradient(rgba(0,0,0,0.35), rgba(0,0,0,0.55)),
+        url("data:image/jpg;base64,{img_base64}");
     background-size: cover;
     background-position: center;
     background-attachment: fixed;
@@ -1186,34 +1137,43 @@ st.markdown(
     .block-container {{
         padding-top: 2rem;
         padding-bottom: 2rem;
-        border-radius: 24px;
+        background: rgba(255,255,255,0.88);
+        backdrop-filter: blur(6px);
+        border-radius: 26px;
         margin-top: 24px;
         margin-bottom: 24px;
-        box-shadow: 0px 8px 30px rgba(0,0,0,0.25);
+        box-shadow: 0px 10px 35px rgba(0,0,0,0.32);
+    }}
+
+    h1, h2, h3, h4, h5, h6 {{
+        color: #102a43;
+        text-shadow: 0px 1px 2px rgba(255,255,255,0.6);
     }}
 
     .title {{
-        font-size: clamp(32px, 5vw, 52px);
+        font-size: clamp(34px, 5vw, 58px);
         font-weight: 900;
         margin-bottom: 0px;
         color: #102a43;
         letter-spacing: -1px;
+        text-shadow: 0px 2px 8px rgba(255,255,255,0.8);
     }}
 
     .subtitle {{
-        font-size: clamp(14px, 2vw, 18px);
+        font-size: clamp(14px, 2vw, 19px);
         color: #334e68;
         margin-top: 0px;
         margin-bottom: 25px;
+        text-shadow: 0px 1px 4px rgba(255,255,255,0.7);
     }}
 
     .card {{
-        padding: 18px;
-        border-radius: 18px;
+        padding: 20px;
+        border-radius: 20px;
         text-align: center;
-        box-shadow: 0px 4px 20px rgba(0,0,0,0.18);
-        height: 178px;
-        min-height: 178px;
+        box-shadow: 0px 6px 24px rgba(0,0,0,0.24);
+        height: 182px;
+        min-height: 182px;
         display: flex;
         flex-direction: column;
         justify-content: center;
@@ -1221,6 +1181,45 @@ st.markdown(
         box-sizing: border-box;
         overflow: hidden;
         width: 100%;
+        transform: translateY(0);
+        transition: all 0.25s ease;
+    }}
+
+    .card:hover {{
+        transform: translateY(-4px);
+        box-shadow: 0px 10px 30px rgba(0,0,0,0.32);
+    }}
+
+    .card h3 {{
+        margin: 0px 0px 14px 0px;
+        font-size: clamp(15px, 2vw, 24px);
+        line-height: 1.15;
+        max-width: 100%;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        text-shadow: 0px 2px 6px rgba(0,0,0,0.35);
+    }}
+
+    .card h1 {{
+        margin: 0px;
+        font-size: clamp(26px, 4vw, 42px);
+        line-height: 1.1;
+        max-width: 100%;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        text-shadow: 0px 2px 6px rgba(0,0,0,0.35);
+    }}
+
+    .card p {{
+        margin: 12px 0px 0px 0px;
+        font-size: clamp(11px, 1.5vw, 15px);
+        max-width: 100%;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        text-shadow: 0px 2px 6px rgba(0,0,0,0.35);
     }}
 
     .gold {{
@@ -1260,33 +1259,11 @@ st.markdown(
         margin-bottom: 18px;
     }}
 
-    .card h3 {{
-        margin: 0px 0px 14px 0px;
-        font-size: clamp(15px, 2vw, 24px);
-        line-height: 1.15;
-        max-width: 100%;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }}
-
-    .card h1 {{
-        margin: 0px;
-        font-size: clamp(24px, 4vw, 40px);
-        line-height: 1.1;
-        max-width: 100%;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }}
-
-    .card p {{
-        margin: 12px 0px 0px 0px;
-        font-size: clamp(11px, 1.5vw, 15px);
-        max-width: 100%;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+    .stMetric {{
+        background: rgba(255,255,255,0.72);
+        padding: 12px;
+        border-radius: 14px;
+        box-shadow: 0px 4px 16px rgba(0,0,0,0.12);
     }}
 
     @media (max-width: 768px) {{
@@ -1302,14 +1279,8 @@ st.markdown(
             margin-bottom: 12px;
         }}
 
-        .card h3 {{
-            white-space: normal;
-        }}
-
-        .card h1 {{
-            white-space: normal;
-        }}
-
+        .card h3,
+        .card h1,
         .card p {{
             white-space: normal;
         }}
@@ -1412,27 +1383,19 @@ if te_departaments:
 st.subheader("🥇 TOP 3 General")
 
 top3 = df_ranking.head(3)
+top_cols = st.columns(3, gap="small")
+top_classes = ["gold", "silver", "bronze"]
+top_medals = ["🥇", "🥈", "🥉"]
 
-c1, c2, c3 = st.columns(3, gap="small")
-
-top_cards = [
-    ("🥇", "gold", top3.iloc[0]),
-    ("🥈", "silver", top3.iloc[1]),
-    ("🥉", "bronze", top3.iloc[2]),
-]
-
-for col, (medalla, classe, row) in zip([c1, c2, c3], top_cards):
-    subtext = "punts"
-
-    if "Departament" in row.index:
-        subtext = f"{row['Departament']}"
-
+for i in range(min(3, len(top3))):
+    row = top3.iloc[i]
+    subtext = row["Departament"] if "Departament" in row.index else "punts"
     canvi_pos = row["Canvi posició"] if "Canvi posició" in row.index else ""
 
-    col.markdown(
+    top_cols[i].markdown(
         f"""
-        <div class='card {classe}'>
-            <h3>{medalla} {row["Participant"]}</h3>
+        <div class='card {top_classes[i]}'>
+            <h3>{top_medals[i]} {row["Participant"]}</h3>
             <h1>{float(row["Punts"]):.1f}</h1>
             <p>{subtext} · {canvi_pos}</p>
         </div>
@@ -1492,18 +1455,22 @@ if jugador is not None:
             departament_jugador = valor_o_pendent(df_j[col_dep_original].values[0])
             c1.metric("Departament", departament_jugador)
 
-        punts_dict = {
-            "1rs grup": pd.to_numeric(df_j["Punts Grups 1r"].values[0], errors="coerce"),
-            "2ns grup": pd.to_numeric(df_j["Punts Grups 2n"].values[0], errors="coerce"),
-            "3rs grup": pd.to_numeric(df_j["Punts Grups 3r"].values[0], errors="coerce"),
-            "Vuitens": pd.to_numeric(df_j["Punts Vuitens"].values[0], errors="coerce"),
-            "Quarts": pd.to_numeric(df_j["Punts Quarts"].values[0], errors="coerce"),
-            "Semis": pd.to_numeric(df_j["Punts Semis"].values[0], errors="coerce"),
-            "Finalistes": pd.to_numeric(df_j["Punts Finalistes"].values[0], errors="coerce"),
-            "Campió": pd.to_numeric(df_j["Punts Campió"].values[0], errors="coerce"),
-            "MVP": pd.to_numeric(df_j["Punts MVP"].values[0], errors="coerce"),
-            "Pichichi": pd.to_numeric(df_j["Punts Pichichi"].values[0], errors="coerce"),
-        }
+        punts_dict = {}
+
+        for label, col in [
+            ("1rs grup", "Punts Grups 1r"),
+            ("2ns grup", "Punts Grups 2n"),
+            ("3rs grup", "Punts Grups 3r"),
+            ("Vuitens", "Punts Vuitens"),
+            ("Quarts", "Punts Quarts"),
+            ("Semis", "Punts Semis"),
+            ("Finalistes", "Punts Finalistes"),
+            ("Campió", "Punts Campió"),
+            ("MVP", "Punts MVP"),
+            ("Pichichi", "Punts Pichichi"),
+        ]:
+            if col in df_j.columns:
+                punts_dict[label] = pd.to_numeric(df_j[col].values[0], errors="coerce")
 
         punts_categoria = pd.DataFrame({
             "Categoria": list(punts_dict.keys()),
@@ -1536,10 +1503,15 @@ if jugador is not None:
             resultat_final = "Pendent"
 
         c2.write("### ⚽ Prediccions principals")
-        c2.write(f"🏆 Campió: {afegir_bandera(valor_o_pendent(df_j['Campió'].values[0]))}")
+
+        campio = valor_o_pendent(df_j["Campió"].values[0]) if "Campió" in df_j.columns else "Pendent"
+        mvp = valor_o_pendent(df_j["MVP"].values[0]) if "MVP" in df_j.columns else "Pendent"
+        pichichi = valor_o_pendent(df_j["Pichichi"].values[0]) if "Pichichi" in df_j.columns else "Pendent"
+
+        c2.write(f"🏆 Campió: {afegir_bandera(campio)}")
         c2.write(f"📌 Resultat final: {resultat_final}")
-        c2.write(f"⭐ MVP: {valor_o_pendent(df_j['MVP'].values[0])}")
-        c2.write(f"⚽ Pichichi: {valor_o_pendent(df_j['Pichichi'].values[0])}")
+        c2.write(f"⭐ MVP: {mvp}")
+        c2.write(f"⚽ Pichichi: {pichichi}")
 
         mostrar_prediccions_eliminatoria_participant(df_j)
 
@@ -1613,7 +1585,7 @@ else:
 
 
 # --------------------------------------------------
-# LLIGUETES
+# LLIGUETA PERSONALITZADA
 # --------------------------------------------------
 st.subheader("🏟️ Lligueta personalitzada")
 
@@ -1655,22 +1627,17 @@ COL_GRUP = "Grup"
 COL_POSICIO = "Posició"
 COL_EQUIP = "Equip"
 
+COL_SETZENS = "Setzens"
 COL_VUITENS = "Vuitens"
 COL_QUARTS = "Quarts"
 COL_SEMIS = "Semis"
 COL_FINALISTES = "Finalistes"
 COL_CAMPIO = "Campió"
 COL_MVP = "MVP"
-
 COL_RESULTAT_FINAL = "Resultat Final"
-
 COL_PICHICHI = "Jugador Pichichi"
 COL_GOLS = "Gols"
 
-
-# --------------------------------------------------
-# CARDS RESUM RESULTATS REALS
-# --------------------------------------------------
 campio_real = afegir_bandera(primer_valor_o_pendent(df_resultats_display, COL_CAMPIO))
 mvp_real = primer_valor_o_pendent(df_resultats_display, COL_MVP)
 resultat_final_real = primer_valor_o_pendent(df_resultats_display, COL_RESULTAT_FINAL)
@@ -1781,6 +1748,7 @@ else:
 st.write("### ⚔️ Fase eliminatòria")
 
 fases_eliminatoria = [
+    COL_SETZENS,
     COL_VUITENS,
     COL_QUARTS,
     COL_SEMIS,
