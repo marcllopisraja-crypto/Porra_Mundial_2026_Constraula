@@ -85,7 +85,6 @@ FLAGS = {
     "espanya": "🇪🇸",
     "franca": "🇫🇷",
     "senegal": "🇸🇳",
-    "iraq": "🇮🇶",
     "argentina": "🇦🇷",
     "algeria": "🇩🇿",
     "austria": "🇦🇹",
@@ -111,7 +110,7 @@ FLAGS = {
 
 
 # --------------------------------------------------
-# FUNCIONS DE CARREGA
+# CÀRREGA DADES
 # --------------------------------------------------
 @st.cache_data(show_spinner=False)
 def carregar_dades(excel_file, file_mtime):
@@ -198,6 +197,7 @@ def obtenir_data_actualitzacio_fitxer(path):
     timestamp = os.path.getmtime(path)
     dt = datetime.fromtimestamp(timestamp, tz=ZoneInfo("Europe/Madrid"))
 
+    # Només data, sense hora
     return dt.strftime("%d/%m/%Y")
 
 
@@ -507,18 +507,10 @@ def aplicar_moviment(df_ranking, excel_mtime):
         return df_actual
 
     df_prev["Participant"] = df_prev["Participant"].astype(str).str.strip()
-
     df_actual = df_actual.merge(df_prev, on="Participant", how="left")
 
-    df_actual["Punts anteriors"] = pd.to_numeric(
-        df_actual["Punts anteriors"],
-        errors="coerce"
-    )
-
-    df_actual["Posició anterior"] = pd.to_numeric(
-        df_actual["Posició anterior"],
-        errors="coerce"
-    )
+    df_actual["Punts anteriors"] = pd.to_numeric(df_actual["Punts anteriors"], errors="coerce")
+    df_actual["Posició anterior"] = pd.to_numeric(df_actual["Posició anterior"], errors="coerce")
 
     df_actual["Canvi punts"] = (
         df_actual["Punts"] - df_actual["Punts anteriors"]
@@ -569,12 +561,7 @@ def aplicar_moviment_departament(df_dep_actual, df_ranking_global, departament):
         if col in df_dep.columns:
             df_dep = df_dep.drop(columns=[col])
 
-    if "Punts anteriors" not in df_ranking_global.columns:
-        df_dep["Canvi posició"] = "⚪ —"
-        df_dep["Canvi punts"] = 0.0
-        return df_dep
-
-    if "Departament" not in df_ranking_global.columns:
+    if "Punts anteriors" not in df_ranking_global.columns or "Departament" not in df_ranking_global.columns:
         df_dep["Canvi posició"] = "⚪ —"
         df_dep["Canvi punts"] = 0.0
         return df_dep
@@ -611,21 +598,10 @@ def aplicar_moviment_departament(df_dep_actual, df_ranking_global, departament):
         "Punts anteriors": "Punts anteriors dep"
     })
 
-    df_dep = df_dep.merge(
-        df_prev_dep,
-        on="Participant",
-        how="left"
-    )
+    df_dep = df_dep.merge(df_prev_dep, on="Participant", how="left")
 
-    df_dep["Punts anteriors dep"] = pd.to_numeric(
-        df_dep["Punts anteriors dep"],
-        errors="coerce"
-    )
-
-    df_dep["Posició anterior dep"] = pd.to_numeric(
-        df_dep["Posició anterior dep"],
-        errors="coerce"
-    )
+    df_dep["Punts anteriors dep"] = pd.to_numeric(df_dep["Punts anteriors dep"], errors="coerce")
+    df_dep["Posició anterior dep"] = pd.to_numeric(df_dep["Posició anterior dep"], errors="coerce")
 
     df_dep["Canvi punts"] = (
         df_dep["Punts"] - df_dep["Punts anteriors dep"]
@@ -969,7 +945,12 @@ def mostrar_grafic_punts(df, color="#0b70c9", altura_minima=950):
         .mark_bar(color=color)
         .encode(
             x=alt.X("Punts:Q", title="Punts", scale=alt.Scale(zero=False)),
-            y=alt.Y("Participant:N", sort="-x", title=None, axis=alt.Axis(labelLimit=560, labelFontSize=12)),
+            y=alt.Y(
+                "Participant:N",
+                sort="-x",
+                title=None,
+                axis=alt.Axis(labelLimit=560, labelFontSize=12)
+            ),
             tooltip=[
                 alt.Tooltip("Posició:Q", title="Posició"),
                 alt.Tooltip("Participant:N", title="Participant"),
@@ -995,7 +976,12 @@ def mostrar_grafic_departaments(df_dep):
         .mark_bar(color="#0f9d58")
         .encode(
             x=alt.X("Mitjana_punts:Q", title="Mitjana de punts", scale=alt.Scale(zero=False)),
-            y=alt.Y("Departament:N", sort="-x", title=None, axis=alt.Axis(labelLimit=560, labelFontSize=13)),
+            y=alt.Y(
+                "Departament:N",
+                sort="-x",
+                title=None,
+                axis=alt.Axis(labelLimit=560, labelFontSize=13)
+            ),
             tooltip=[
                 alt.Tooltip("Posició:Q", title="Posició"),
                 alt.Tooltip("Departament:N", title="Departament"),
@@ -1109,8 +1095,45 @@ def mostrar_prediccions_eliminatoria_participant(df_j):
         st.dataframe(df_campio, use_container_width=True, hide_index=True)
 
 
+def mostrar_fase_eliminatoria_responsive(files_eliminatoria):
+    if len(files_eliminatoria) == 0:
+        st.info("No hi ha dades de fase eliminatòria configurades.")
+        return
+
+    html_files = ""
+
+    for fila in files_eliminatoria:
+        fase = fila["Fase"]
+        resultat = str(fila["Resultat"]).strip()
+
+        if resultat == "" or normalitzar_text(resultat) == "pendent":
+            equips_html = "<span class='elim-pending'>Pendent</span>"
+        else:
+            equips = [x.strip() for x in resultat.split(" · ") if x.strip() != ""]
+            equips_html = "".join([
+                f"<span class='elim-badge'>{equip}</span>"
+                for equip in equips
+            ])
+
+        html_files += f"""
+        <div class="elim-row">
+            <div class="elim-phase">{fase}</div>
+            <div class="elim-teams">{equips_html}</div>
+        </div>
+        """
+
+    st.markdown(
+        f"""
+        <div class="elim-wrapper">
+            {html_files}
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+
 # --------------------------------------------------
-# ESTILS V5
+# ESTILS V5 + ELIMINATÒRIA RESPONSIVE
 # --------------------------------------------------
 img_base64 = carregar_imatge_base64(BACKGROUND_IMAGE)
 
@@ -1266,6 +1289,67 @@ st.markdown(
         box-shadow: 0px 4px 16px rgba(0,0,0,0.12);
     }}
 
+    .elim-wrapper {{
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        margin-top: 12px;
+        margin-bottom: 18px;
+    }}
+
+    .elim-row {{
+        display: grid;
+        grid-template-columns: 150px minmax(0, 1fr);
+        gap: 12px;
+        align-items: flex-start;
+        background: rgba(255,255,255,0.78);
+        border: 1px solid rgba(0,0,0,0.08);
+        border-radius: 16px;
+        padding: 14px;
+        box-shadow: 0px 4px 16px rgba(0,0,0,0.10);
+    }}
+
+    .elim-phase {{
+        font-weight: 800;
+        color: #102a43;
+        font-size: 15px;
+        padding-top: 6px;
+    }}
+
+    .elim-teams {{
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+        line-height: 1.35;
+        min-width: 0;
+    }}
+
+    .elim-badge {{
+        display: inline-block;
+        background: #edf2f7;
+        color: #102a43;
+        border: 1px solid #d9e2ec;
+        border-radius: 999px;
+        padding: 6px 10px;
+        font-size: 13px;
+        font-weight: 600;
+        white-space: normal;
+        max-width: 100%;
+        box-shadow: 0px 2px 6px rgba(0,0,0,0.06);
+    }}
+
+    .elim-pending {{
+        display: inline-block;
+        background: #fff3cd;
+        color: #665200;
+        border: 1px solid #ffe08a;
+        border-radius: 999px;
+        padding: 6px 10px;
+        font-size: 13px;
+        font-weight: 700;
+    }}
+
     @media (max-width: 768px) {{
         .block-container {{
             padding-left: 0.8rem;
@@ -1283,6 +1367,23 @@ st.markdown(
         .card h1,
         .card p {{
             white-space: normal;
+        }}
+
+        .elim-row {{
+            grid-template-columns: 1fr;
+            padding: 12px;
+        }}
+
+        .elim-phase {{
+            font-size: 16px;
+            padding-top: 0;
+            border-bottom: 1px solid rgba(0,0,0,0.08);
+            padding-bottom: 8px;
+        }}
+
+        .elim-badge {{
+            font-size: 12px;
+            padding: 5px 8px;
         }}
     }}
     </style>
@@ -1743,7 +1844,7 @@ else:
 
 
 # --------------------------------------------------
-# FASE ELIMINATÒRIA
+# FASE ELIMINATÒRIA RESPONSIVE
 # --------------------------------------------------
 st.write("### ⚔️ Fase eliminatòria")
 
@@ -1778,16 +1879,7 @@ for fase in fases_eliminatoria:
             "Resultat": detall
         })
 
-if len(files_eliminatoria) > 0:
-    taula_eliminatoria = pd.DataFrame(files_eliminatoria)
-
-    st.dataframe(
-        taula_eliminatoria,
-        use_container_width=True,
-        hide_index=True
-    )
-else:
-    st.info("No hi ha dades de fase eliminatòria configurades.")
+mostrar_fase_eliminatoria_responsive(files_eliminatoria)
 
 
 # --------------------------------------------------
