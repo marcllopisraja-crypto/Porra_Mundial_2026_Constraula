@@ -1579,8 +1579,9 @@ def mostrar_taula_ranking(df):
 
     if "Canvi punts" in df.columns:
         cols.append("Canvi punts")
-
-    cols_existents_existents].copy()
+    
+    cols_existents = [c for c in cols if c in df.columns]
+    df_display = df[cols_existents].copy()
 
     df_display["Punts"] = df_display["Punts"].astype(float).round(1)
     df_display["Dif líder"] = df_display["Dif líder"].astype(float).round(1)
