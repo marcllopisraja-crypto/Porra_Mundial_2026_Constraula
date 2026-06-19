@@ -6,7 +6,7 @@ import base64
 import os
 import json
 import unicodedata
-import time
+import hashlib
 import requests
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -28,78 +28,58 @@ HISTORY_FILE = "ranking_history.csv"
 THESTATSAPI_BASE_URL = "https://api.thestatsapi.com/api/football/matches"
 DEFAULT_COMPETITION_ID = "comp_6107"
 DEFAULT_SEASON_ID = "sn_118868"
+API_TIMEOUT_SECONDS = 8
 
-with st.sidebar:
-    st.write("### ⚙️ Gestió")
-    if st.button("🔄 Reiniciar comparativa de moviments"):
-        for fitxer in [SNAPSHOT_CURRENT_FILE, SNAPSHOT_DISPLAY_FILE, SNAPSHOT_META_FILE]:
-            if os.path.exists(fitxer):
-                os.remove(fitxer)
-        st.rerun()
-    if st.button("🧹 Reiniciar històric d’evolució"):
-        if os.path.exists(HISTORY_FILE):
-            os.remove(HISTORY_FILE)
-        st.rerun()
-    st.markdown("---")
-    st.caption("Mode híbrid: Excel manual + API TheStatsAPI opcional.")
-
-
-def llegir_secret(nom, defecte=None):
-    try:
-        return st.secrets[nom]
-    except Exception:
-        return defecte
-
-
-def obtenir_config_api():
-    return {
-        "use_api": str(llegir_secret("USE_API_RESULTS", "false")).lower() == "true",
-        "api_key": llegir_secret("THESTATSAPI_KEY", ""),
-        "competition_id": llegir_secret("THESTATSAPI_COMPETITION_ID", DEFAULT_COMPETITION_ID),
-        "season_id": llegir_secret("THESTATSAPI_SEASON_ID", DEFAULT_SEASON_ID),
-    }
-
-FLAGS = {
-    "mexic": "🇲🇽", "mexico": "🇲🇽", "corea del sud": "🇰🇷", "south korea": "🇰🇷", "korea republic": "🇰🇷",
-    "republica txeca": "🇨🇿", "czechia": "🇨🇿", "suissa": "🇨🇭", "switzerland": "🇨🇭", "canada": "🇨🇦",
-    "qatar": "🇶🇦", "escocia": "🏴", "scotland": "🏴", "marroc": "🇲🇦", "morocco": "🇲🇦",
-    "brasil": "🇧🇷", "brazil": "🇧🇷", "estats units": "🇺🇸", "united states": "🇺🇸", "usa": "🇺🇸", "eeuu": "🇺🇸", "ee.uu": "🇺🇸",
-    "australia": "🇦🇺", "turquia": "🇹🇷", "turkiye": "🇹🇷", "turkey": "🇹🇷", "alemanya": "🇩🇪", "germany": "🇩🇪",
-    "costa d'ivori": "🇨🇮", "cote d'ivoire": "🇨🇮", "côte d'ivoire": "🇨🇮", "equador": "🇪🇨", "ecuador": "🇪🇨",
-    "suecia": "🇸🇪", "sweden": "🇸🇪", "japo": "🇯🇵", "japan": "🇯🇵", "paisos baixos": "🇳🇱", "netherlands": "🇳🇱",
-    "nova zelanda": "🇳🇿", "new zealand": "🇳🇿", "iran": "🇮🇷", "ir iran": "🇮🇷", "belgica": "🇧🇪", "belgium": "🇧🇪",
-    "uruguai": "🇺🇾", "uruguay": "🇺🇾", "arabia saudita": "🇸🇦", "saudi arabia": "🇸🇦", "espanya": "🇪🇸", "spain": "🇪🇸",
-    "franca": "🇫🇷", "france": "🇫🇷", "senegal": "🇸🇳", "argentina": "🇦🇷", "algeria": "🇩🇿", "austria": "🇦🇹",
-    "portugal": "🇵🇹", "rd congo": "🇨🇩", "dr congo": "🇨🇩", "congo dr": "🇨🇩", "uzbekistan": "🇺🇿",
-    "anglaterra": "🏴", "england": "🏴", "croacia": "🇭🇷", "croatia": "🇭🇷", "ghana": "🇬🇭", "egipte": "🇪🇬", "egypt": "🇪🇬",
-    "noruega": "🇳🇴", "norway": "🇳🇴", "colombia": "🇨🇴", "colòmbia": "🇨🇴", "bosnia i hercegovina": "🇧🇦", "bosnia and herzegovina": "🇧🇦", "bosnia & herzegovina": "🇧🇦",
-    "paraguai": "🇵🇾", "paraguay": "🇵🇾", "tunisia": "🇹🇳", "tunísia": "🇹🇳", "cap verd": "🇨🇻", "cabo verde": "🇨🇻",
-    "jordania": "🇯🇴", "jordània": "🇯🇴", "jordan": "🇯🇴", "panama": "🇵🇦", "panamà": "🇵🇦", "curacao": "🇨🇼", "curaçao": "🇨🇼",
-    "haiti": "🇭🇹", "haití": "🇭🇹", "sud-africa": "🇿🇦", "sud-àfrica": "🇿🇦", "south africa": "🇿🇦",
-}
-
-TEAM_NAME_MAP = {k: v for k, v in {
-    "mexico": "Mèxic", "mexic": "Mèxic", "south africa": "Sud-àfrica", "sud africa": "Sud-àfrica", "sud-africa": "Sud-àfrica", "sud-àfrica": "Sud-àfrica",
-    "korea republic": "Corea del Sud", "south korea": "Corea del Sud", "corea del sud": "Corea del Sud", "czechia": "República Txeca", "republica txeca": "República Txeca", "republica checa": "República Txeca",
-    "canada": "Canadà", "bosnia and herzegovina": "Bosnia i Hercegovina", "bosnia & herzegovina": "Bosnia i Hercegovina", "bosnia i hercegovina": "Bosnia i Hercegovina", "qatar": "Qatar",
-    "switzerland": "Suïssa", "suissa": "Suïssa", "brazil": "Brasil", "brasil": "Brasil", "morocco": "Marroc", "marroc": "Marroc", "haiti": "Haití", "haití": "Haití", "scotland": "Escòcia", "escocia": "Escòcia",
-    "united states": "Estats Units", "usa": "Estats Units", "eeuu": "Estats Units", "ee.uu": "Estats Units", "estats units": "Estats Units", "paraguay": "Paraguai", "paraguai": "Paraguai",
-    "australia": "Austràlia", "turkiye": "Turquia", "turkey": "Turquia", "turquia": "Turquia", "germany": "Alemanya", "alemanya": "Alemanya", "curacao": "Curaçao", "curaçao": "Curaçao",
-    "cote d'ivoire": "Costa d'Ivori", "côte d'ivoire": "Costa d'Ivori", "costa d'ivori": "Costa d'Ivori", "ecuador": "Equador", "equador": "Equador", "netherlands": "Països Baixos", "paisos baixos": "Països Baixos", "pasïsos baixos": "Països Baixos",
-    "japan": "Japó", "japo": "Japó", "sweden": "Suècia", "suecia": "Suècia", "tunisia": "Tunísia", "belgium": "Bèlgica", "belgica": "Bèlgica", "egypt": "Egipte", "egipte": "Egipte", "ir iran": "Iran", "iran": "Iran",
-    "new zealand": "Nova Zelanda", "nova zelanda": "Nova Zelanda", "spain": "Espanya", "espanya": "Espanya", "cabo verde": "Cap Verd", "cap verd": "Cap Verd", "saudi arabia": "Aràbia Saudita", "arabia saudita": "Aràbia Saudita",
-    "uruguay": "Uruguai", "uruguai": "Uruguai", "france": "França", "franca": "França", "senegal": "Senegal", "iraq": "Iraq", "norway": "Noruega", "noruega": "Noruega", "argentina": "Argentina", "algeria": "Algèria", "austria": "Àustria",
-    "jordan": "Jordània", "jordania": "Jordània", "portugal": "Portugal", "congo dr": "RD Congo", "dr congo": "RD Congo", "rd congo": "RD Congo", "uzbekistan": "Uzbekistan", "colombia": "Colòmbia", "colòmbia": "Colòmbia",
-    "england": "Anglaterra", "anglaterra": "Anglaterra", "croatia": "Croàcia", "croacia": "Croàcia", "ghana": "Ghana", "panama": "Panamà", "panamà": "Panamà",
-}.items()}
-
-
+# ==================================================
+# NORMALITZACIÓ
+# ==================================================
 def normalitzar_text(text):
     text = str(text).strip().lower().replace("’", "'").replace("`", "'")
     text = unicodedata.normalize("NFD", text)
     text = "".join(char for char in text if unicodedata.category(char) != "Mn")
     return " ".join(text.split())
 
+TEAM_NAME_MAP_RAW = {
+    "mexico": "Mèxic", "mexic": "Mèxic", "méxic": "Mèxic",
+    "south africa": "Sud-àfrica", "sud africa": "Sud-àfrica", "sud-africa": "Sud-àfrica", "sud-àfrica": "Sud-àfrica",
+    "korea republic": "Corea del Sud", "south korea": "Corea del Sud", "corea del sud": "Corea del Sud",
+    "czechia": "República Txeca", "republica txeca": "República Txeca", "república txeca": "República Txeca", "republica checa": "República Txeca",
+    "canada": "Canadà", "canadà": "Canadà",
+    "bosnia and herzegovina": "Bosnia i Hercegovina", "bosnia & herzegovina": "Bosnia i Hercegovina", "bosnia i hercegovina": "Bosnia i Hercegovina",
+    "qatar": "Qatar", "switzerland": "Suïssa", "suissa": "Suïssa", "suïssa": "Suïssa",
+    "brazil": "Brasil", "brasil": "Brasil", "morocco": "Marroc", "marroc": "Marroc",
+    "haiti": "Haití", "haití": "Haití", "scotland": "Escòcia", "escocia": "Escòcia", "escòcia": "Escòcia",
+    "united states": "Estats Units", "usa": "Estats Units", "eeuu": "Estats Units", "ee.uu": "Estats Units", "estats units": "Estats Units",
+    "paraguay": "Paraguai", "paraguai": "Paraguai", "australia": "Austràlia", "austràlia": "Austràlia",
+    "turkiye": "Turquia", "turkey": "Turquia", "turquia": "Turquia",
+    "germany": "Alemanya", "alemanya": "Alemanya", "curacao": "Curaçao", "curaçao": "Curaçao",
+    "cote d'ivoire": "Costa d'Ivori", "côte d'ivoire": "Costa d'Ivori", "costa d'ivori": "Costa d'Ivori",
+    "ecuador": "Equador", "equador": "Equador", "netherlands": "Països Baixos", "paisos baixos": "Països Baixos", "països baixos": "Països Baixos", "pasïsos baixos": "Països Baixos",
+    "japan": "Japó", "japo": "Japó", "japó": "Japó", "sweden": "Suècia", "suecia": "Suècia", "suècia": "Suècia", "tunisia": "Tunísia", "tunísia": "Tunísia",
+    "belgium": "Bèlgica", "belgica": "Bèlgica", "bèlgica": "Bèlgica", "egypt": "Egipte", "egipte": "Egipte",
+    "ir iran": "Iran", "iran": "Iran", "new zealand": "Nova Zelanda", "nova zelanda": "Nova Zelanda",
+    "spain": "Espanya", "espanya": "Espanya", "cabo verde": "Cap Verd", "cap verd": "Cap Verd",
+    "saudi arabia": "Aràbia Saudita", "arabia saudita": "Aràbia Saudita", "aràbia saudita": "Aràbia Saudita",
+    "uruguay": "Uruguai", "uruguai": "Uruguai", "france": "França", "franca": "França", "frança": "França",
+    "senegal": "Senegal", "iraq": "Iraq", "norway": "Noruega", "noruega": "Noruega",
+    "argentina": "Argentina", "algeria": "Algèria", "algèria": "Algèria", "austria": "Àustria", "àustria": "Àustria",
+    "jordan": "Jordània", "jordania": "Jordània", "jordània": "Jordània", "portugal": "Portugal",
+    "congo dr": "RD Congo", "dr congo": "RD Congo", "rd congo": "RD Congo", "uzbekistan": "Uzbekistan",
+    "colombia": "Colòmbia", "colòmbia": "Colòmbia", "england": "Anglaterra", "anglaterra": "Anglaterra",
+    "croatia": "Croàcia", "croacia": "Croàcia", "croàcia": "Croàcia", "ghana": "Ghana", "panama": "Panamà", "panamà": "Panamà",
+}
+TEAM_NAME_MAP = {normalitzar_text(k): v for k, v in TEAM_NAME_MAP_RAW.items()}
+
+FLAGS = {
+    "mexic": "🇲🇽", "corea del sud": "🇰🇷", "republica txeca": "🇨🇿", "suissa": "🇨🇭", "canada": "🇨🇦", "qatar": "🇶🇦",
+    "escocia": "🏴", "marroc": "🇲🇦", "brasil": "🇧🇷", "estats units": "🇺🇸", "australia": "🇦🇺", "turquia": "🇹🇷",
+    "alemanya": "🇩🇪", "costa d'ivori": "🇨🇮", "equador": "🇪🇨", "suecia": "🇸🇪", "japo": "🇯🇵", "paisos baixos": "🇳🇱",
+    "nova zelanda": "🇳🇿", "iran": "🇮🇷", "belgica": "🇧🇪", "uruguai": "🇺🇾", "arabia saudita": "🇸🇦", "espanya": "🇪🇸",
+    "franca": "🇫🇷", "senegal": "🇸🇳", "iraq": "🇮🇶", "argentina": "🇦🇷", "algeria": "🇩🇿", "austria": "🇦🇹",
+    "portugal": "🇵🇹", "rd congo": "🇨🇩", "uzbekistan": "🇺🇿", "anglaterra": "🏴", "croacia": "🇭🇷", "ghana": "🇬🇭",
+    "egipte": "🇪🇬", "noruega": "🇳🇴", "colombia": "🇨🇴", "bosnia i hercegovina": "🇧🇦", "paraguai": "🇵🇾", "tunisia": "🇹🇳",
+    "cap verd": "🇨🇻", "jordania": "🇯🇴", "panama": "🇵🇦", "curacao": "🇨🇼", "haiti": "🇭🇹", "sud-africa": "🇿🇦",
+}
 
 def normalitzar_equip(valor):
     if pd.isna(valor):
@@ -109,46 +89,26 @@ def normalitzar_equip(valor):
         return ""
     return TEAM_NAME_MAP.get(normalitzar_text(text), text)
 
-
 def afegir_bandera(valor):
     if pd.isna(valor):
         return "Pendent"
     text = str(valor).strip()
-    if text == "" or normalitzar_text(text) in ["nan", "nat", "pendent", "none"]:
+    if text == "" or normalitzar_text(text) in ["pendent", "nan", "nat", "none"]:
         return "Pendent"
-    text_norm = normalitzar_text(text)
+    equip = normalitzar_equip(text)
+    norm = normalitzar_text(equip)
     for pais, bandera in FLAGS.items():
-        if pais in text_norm:
-            return f"{bandera} {text}"
-    return text
-
+        if pais in norm:
+            return f"{bandera} {equip}"
+    return equip
 
 def valor_o_pendent(valor):
     if pd.isna(valor):
         return "Pendent"
     text = str(valor).strip()
-    if text == "" or normalitzar_text(text) in ["nan", "nat", "none"]:
+    if text == "" or normalitzar_text(text) in ["nan", "nat", "none", "pendent"]:
         return "Pendent"
     return text
-
-
-def obtenir_columna_departament(df):
-    for col in df.columns:
-        if normalitzar_text(col) == "departament":
-            return col
-    for col in df.columns:
-        if "depart" in normalitzar_text(col):
-            return col
-    return None
-
-
-def obtenir_data_actualitzacio_fitxer(path):
-    if not os.path.exists(path):
-        return "No disponible"
-    timestamp = os.path.getmtime(path)
-    dt = datetime.fromtimestamp(timestamp, tz=ZoneInfo("Europe/Madrid"))
-    return dt.strftime("%d/%m/%Y")
-
 
 def convertir_a_int(valor):
     if valor is None:
@@ -166,6 +126,26 @@ def convertir_a_int(valor):
         except Exception:
             return None
 
+# ==================================================
+# SECRETS / API
+# ==================================================
+def llegir_secret(nom, defecte=None):
+    try:
+        return st.secrets[nom]
+    except Exception:
+        return defecte
+
+def obtenir_config_api():
+    return {
+        "use_api": str(llegir_secret("USE_API_RESULTS", "false")).lower() == "true",
+        "api_key": str(llegir_secret("THESTATSAPI_KEY", "")).strip(),
+        "competition_id": str(llegir_secret("THESTATSAPI_COMPETITION_ID", DEFAULT_COMPETITION_ID)).strip(),
+        "season_id": str(llegir_secret("THESTATSAPI_SEASON_ID", DEFAULT_SEASON_ID)).strip(),
+    }
+
+# ==================================================
+# CÀRREGA EXCEL
+# ==================================================
 @st.cache_data(show_spinner=False)
 def carregar_dades(excel_file, file_mtime):
     sheets = pd.read_excel(excel_file, sheet_name=["Porra", "Resultats Reals"], engine="openpyxl")
@@ -182,51 +162,67 @@ def carregar_imatge_base64(image_path):
     with open(image_path, "rb") as f:
         return base64.b64encode(f.read()).decode()
 
+def obtenir_columna_departament(df):
+    for col in df.columns:
+        if normalitzar_text(col) == "departament":
+            return col
+    for col in df.columns:
+        if "depart" in normalitzar_text(col):
+            return col
+    return None
+
+def trobar_columna_flexible(df, nom):
+    nom_norm = normalitzar_text(nom)
+    for col in df.columns:
+        if normalitzar_text(col) == nom_norm:
+            return col
+    return None
+
+def obtenir_data_actualitzacio_fitxer(path):
+    if not os.path.exists(path):
+        return "No disponible"
+    timestamp = os.path.getmtime(path)
+    dt = datetime.fromtimestamp(timestamp, tz=ZoneInfo("Europe/Madrid"))
+    return dt.strftime("%d/%m/%Y")
 
 def preparar_taula_buida(df):
-    df = df.copy().dropna(how="all").dropna(axis=1, how="all").fillna("")
-    return df
-
+    return df.copy().dropna(how="all").dropna(axis=1, how="all").fillna("")
 
 def llista_valors_no_buits(df, columna):
-    if columna not in df.columns:
+    col = trobar_columna_flexible(df, columna)
+    if col is None:
         return []
-    valors = df[columna].astype(str).str.strip().replace("nan", "").replace("NaT", "")
-    valors_nets = []
+    valors = df[col].astype(str).str.strip().tolist()
+    nets = []
+    vistos = set()
     for valor in valors:
-        if valor == "" or normalitzar_text(valor) in ["nan", "nat"]:
+        if valor == "" or normalitzar_text(valor) in ["nan", "nat", "none"]:
             continue
         if normalitzar_text(valor) == "pendent":
-            valor = "Pendent"
-        valors_nets.append(valor)
-    valors_unics = []
-    vistos = set()
-    for valor in valors_nets:
-        clau = normalitzar_text(valor)
-        if clau not in vistos:
-            valors_unics.append(valor)
-            vistos.add(clau)
-    if len(valors_unics) > 0 and all(normalitzar_text(v) == "pendent" for v in valors_unics):
-        return ["Pendent"]
-    return valors_unics
-
+            continue
+        equip = normalitzar_equip(valor)
+        if not equip:
+            continue
+        key = normalitzar_text(equip)
+        if key not in vistos:
+            nets.append(equip)
+            vistos.add(key)
+    return nets
 
 def primer_valor_o_pendent(df, columna):
     valors = llista_valors_no_buits(df, columna)
     return valors[0] if valors else "Pendent"
 
-
 def trobar_col_resultat_final_porra(df_porra):
     for col in df_porra.columns:
-        if col.strip() == "Resultat final":
-            return col
-    for col in df_porra.columns:
         col_norm = normalitzar_text(col)
-        if "resultat" in col_norm and "final" in col_norm and "punt" not in col_norm:
+        if col_norm == "resultat final" or ("resultat" in col_norm and "final" in col_norm and "punt" not in col_norm):
             return col
     return None
 
-# API helpers
+# ==================================================
+# API THESTATSAPI
+# ==================================================
 def obtenir_camp_dict(obj, claus, defecte=None):
     if not isinstance(obj, dict):
         return defecte
@@ -235,12 +231,10 @@ def obtenir_camp_dict(obj, claus, defecte=None):
             return obj.get(clau)
     return defecte
 
-
 def extreure_nom_equip(team_obj):
     if isinstance(team_obj, dict):
         return normalitzar_equip(obtenir_camp_dict(team_obj, ["name", "team_name", "display_name", "short_name"]))
     return normalitzar_equip(team_obj)
-
 
 def extreure_score(match):
     score = match.get("score", {})
@@ -253,29 +247,27 @@ def extreure_score(match):
         return convertir_a_int(home), convertir_a_int(away)
     return convertir_a_int(obtenir_camp_dict(match, ["home_score", "score_home", "home_goals"])), convertir_a_int(obtenir_camp_dict(match, ["away_score", "score_away", "away_goals"]))
 
-
 def es_partit_finalitzat(match):
     status = str(match.get("status", "")).strip().lower()
     phase = str(match.get("phase", "")).strip().lower()
-    if status in ["ft", "full_time", "finished", "final", "after_extra_time", "aet", "ft_pen", "finished_penalties", "penalties"] or phase in ["ft", "full_time", "finished", "final", "after_extra_time", "aet", "ft_pen", "finished_penalties", "penalties"]:
+    finals = ["ft", "full_time", "finished", "final", "after_extra_time", "aet", "ft_pen", "finished_penalties", "penalties"]
+    if status in finals or phase in finals:
         return True
     home, away = extreure_score(match)
     return home is not None and away is not None and status not in ["scheduled", "pre", "postponed", "cancelled"]
 
-
 def obtenir_guanyador_match(match):
-    home_team = extreure_nom_equip(match.get("home_team"))
-    away_team = extreure_nom_equip(match.get("away_team"))
-    home_score, away_score = extreure_score(match)
-    if home_score is None or away_score is None:
+    home = extreure_nom_equip(match.get("home_team"))
+    away = extreure_nom_equip(match.get("away_team"))
+    hs, aw = extreure_score(match)
+    if hs is None or aw is None:
         return ""
-    if home_score > away_score:
-        return home_team
-    if away_score > home_score:
-        return away_team
+    if hs > aw:
+        return home
+    if aw > hs:
+        return away
     winner = match.get("winner") or match.get("winning_team") or match.get("winner_team")
     return extreure_nom_equip(winner) if winner else ""
-
 
 def obtenir_grup_match(match):
     group_label = match.get("group_label") or match.get("group") or match.get("group_name")
@@ -283,7 +275,6 @@ def obtenir_grup_match(match):
         return ""
     text = str(group_label).strip().replace("Group", "").replace("Grup", "").strip()
     return text.upper() if text else ""
-
 
 def obtenir_stage_match(match):
     return normalitzar_text(match.get("stage_name") or match.get("stage") or match.get("round") or match.get("round_name") or match.get("phase_name") or "")
@@ -298,7 +289,7 @@ def carregar_matches_thestatsapi(api_key, competition_id, season_id):
     for page in [1, 2]:
         params = {"competition_id": competition_id, "season_id": season_id, "per_page": 100, "page": page}
         try:
-            response = requests.get(THESTATSAPI_BASE_URL, headers=headers, params=params, timeout=20)
+            response = requests.get(THESTATSAPI_BASE_URL, headers=headers, params=params, timeout=API_TIMEOUT_SECONDS)
             if response.status_code != 200:
                 errors.append(f"HTTP {response.status_code} pàgina {page}")
                 continue
@@ -315,14 +306,12 @@ def carregar_matches_thestatsapi(api_key, competition_id, season_id):
                 matches.extend(page_matches)
         except Exception as e:
             errors.append(str(e))
-    if len(matches) == 0:
+    if not matches:
         return [], "No s'han pogut obtenir partits de TheStatsAPI. " + " | ".join(errors)
     return matches, ""
 
-
 def construir_resultats_des_api(matches):
-    group_matches = []
-    knockout_matches = []
+    group_matches, knockout_matches = [], []
     for match in matches:
         stage = obtenir_stage_match(match)
         grup = obtenir_grup_match(match)
@@ -332,6 +321,7 @@ def construir_resultats_des_api(matches):
             group_matches.append(match)
         else:
             knockout_matches.append(match)
+
     standings = {}
     for match in group_matches:
         if not es_partit_finalitzat(match):
@@ -344,8 +334,7 @@ def construir_resultats_des_api(matches):
             continue
         standings.setdefault(grup, {})
         for equip in [home, away]:
-            if equip not in standings[grup]:
-                standings[grup][equip] = {"Equip": equip, "PJ": 0, "PG": 0, "PE": 0, "PP": 0, "GF": 0, "GC": 0, "DG": 0, "Pts": 0}
+            standings[grup].setdefault(equip, {"Equip": equip, "PJ": 0, "PG": 0, "PE": 0, "PP": 0, "GF": 0, "GC": 0, "DG": 0, "Pts": 0})
         standings[grup][home]["PJ"] += 1
         standings[grup][away]["PJ"] += 1
         standings[grup][home]["GF"] += hs
@@ -365,10 +354,10 @@ def construir_resultats_des_api(matches):
             standings[grup][away]["PE"] += 1
             standings[grup][home]["Pts"] += 1
             standings[grup][away]["Pts"] += 1
-        standings[grup][home]["DG"] = standings[grup][home]["GF"] - standings[grup][home]["GC"]
-        standings[grup][away]["DG"] = standings[grup][away]["GF"] - standings[grup][away]["GC"]
-    group_positions = {}
-    tercers = []
+        for equip in [home, away]:
+            standings[grup][equip]["DG"] = standings[grup][equip]["GF"] - standings[grup][equip]["GC"]
+
+    group_positions, tercers = {}, []
     for grup, equips in standings.items():
         taula = pd.DataFrame(list(equips.values()))
         if taula.empty:
@@ -384,15 +373,17 @@ def construir_resultats_des_api(matches):
             tercer = taula.iloc[2].to_dict()
             tercer["Grup"] = grup
             tercers.append(tercer)
+
     setzens = []
     for grup in sorted(group_positions.keys()):
         if "1r" in group_positions[grup]:
             setzens.append(group_positions[grup]["1r"])
         if "2n" in group_positions[grup]:
             setzens.append(group_positions[grup]["2n"])
-    if len(tercers) > 0:
+    if tercers:
         df_tercers = pd.DataFrame(tercers).sort_values(["Pts", "DG", "GF"], ascending=[False, False, False]).head(8)
         setzens.extend(df_tercers["Equip"].tolist())
+
     fases = {"Vuitens": [], "Quarts": [], "Semis": [], "Finalistes": [], "Campió": []}
     for match in knockout_matches:
         if not es_partit_finalitzat(match):
@@ -411,112 +402,142 @@ def construir_resultats_des_api(matches):
             fases["Finalistes"].append(winner)
         elif "final" in stage and "third" not in stage and "3rd" not in stage:
             fases["Campió"] = [winner]
-    return {"source": "API", "group_positions": group_positions, "Setzens": list(dict.fromkeys(setzens)), "Vuitens": list(dict.fromkeys(fases["Vuitens"])), "Quarts": list(dict.fromkeys(fases["Quarts"])), "Semis": list(dict.fromkeys(fases["Semis"])), "Finalistes": list(dict.fromkeys(fases["Finalistes"])), "Campió": list(dict.fromkeys(fases["Campió"])), "MVP": [], "Pichichi": [], "Gols Pichichi": None, "api_error": ""}
 
+    return {
+        "source": "API", "group_positions": group_positions,
+        "Setzens": list(dict.fromkeys(setzens)), "Vuitens": list(dict.fromkeys(fases["Vuitens"])),
+        "Quarts": list(dict.fromkeys(fases["Quarts"])), "Semis": list(dict.fromkeys(fases["Semis"])),
+        "Finalistes": list(dict.fromkeys(fases["Finalistes"])), "Campió": list(dict.fromkeys(fases["Campió"])),
+        "MVP": [], "Pichichi": [], "Gols Pichichi": None, "api_error": ""
+    }
 
 def construir_resultats_des_excel(df_resultats):
     df = preparar_taula_buida(df_resultats)
     resultats = {"source": "Excel", "group_positions": {}, "Setzens": [], "Vuitens": [], "Quarts": [], "Semis": [], "Finalistes": [], "Campió": [], "MVP": [], "Pichichi": [], "Gols Pichichi": None, "api_error": ""}
-    if all(c in df.columns for c in ["Grup", "Posició", "Equip"]):
+
+    col_grup = trobar_columna_flexible(df, "Grup")
+    col_pos = trobar_columna_flexible(df, "Posició")
+    col_equip = trobar_columna_flexible(df, "Equip")
+    if col_grup and col_pos and col_equip:
         for _, row in df.iterrows():
-            grup = str(row.get("Grup", "")).strip()
-            pos = str(row.get("Posició", "")).strip()
-            equip = normalitzar_equip(row.get("Equip", ""))
+            grup = str(row.get(col_grup, "")).strip().replace("Grup ", "").strip()
+            pos = str(row.get(col_pos, "")).strip()
+            equip = normalitzar_equip(row.get(col_equip, ""))
             if not grup or not pos or not equip:
                 continue
-            grup_key = grup.replace("Grup ", "").strip()
-            resultats["group_positions"].setdefault(grup_key, {})
+            resultats["group_positions"].setdefault(grup, {})
             if pos in ["1r", "1", "1º"]:
-                resultats["group_positions"][grup_key]["1r"] = equip
+                resultats["group_positions"][grup]["1r"] = equip
             elif pos in ["2n", "2", "2º"]:
-                resultats["group_positions"][grup_key]["2n"] = equip
+                resultats["group_positions"][grup]["2n"] = equip
             elif pos in ["3r", "3", "3º"]:
-                resultats["group_positions"][grup_key]["3r"] = equip
+                resultats["group_positions"][grup]["3r"] = equip
+
     for fase in ["Setzens", "Vuitens", "Quarts", "Semis", "Finalistes", "Campió", "MVP"]:
-        if fase in df.columns:
-            valors = [normalitzar_equip(valor) for valor in df[fase].tolist()]
-            resultats[fase] = list(dict.fromkeys([v for v in valors if v]))
-    if "Jugador Pichichi" in df.columns and "Gols" in df.columns:
-        taula = df[["Jugador Pichichi", "Gols"]].copy()
-        taula["Jugador Pichichi"] = taula["Jugador Pichichi"].astype(str).str.strip()
-        taula["Gols"] = pd.to_numeric(taula["Gols"], errors="coerce")
-        taula = taula[(taula["Jugador Pichichi"] != "") & (~taula["Jugador Pichichi"].str.lower().isin(["nan", "nat", "pendent"])) & (taula["Gols"] >= 1)]
+        resultats[fase] = llista_valors_no_buits(df, fase)
+
+    col_pichichi = trobar_columna_flexible(df, "Jugador Pichichi")
+    col_gols = trobar_columna_flexible(df, "Gols")
+    if col_pichichi and col_gols:
+        taula = df[[col_pichichi, col_gols]].copy()
+        taula[col_pichichi] = taula[col_pichichi].astype(str).str.strip()
+        taula[col_gols] = pd.to_numeric(taula[col_gols], errors="coerce")
+        taula = taula[(taula[col_pichichi] != "") & (~taula[col_pichichi].str.lower().isin(["nan", "nat", "pendent"])) & (taula[col_gols] >= 1)]
         if not taula.empty:
-            taula = taula.sort_values("Gols", ascending=False).reset_index(drop=True)
-            resultats["Pichichi"] = [taula.iloc[0]["Jugador Pichichi"]]
-            resultats["Gols Pichichi"] = int(taula.iloc[0]["Gols"])
+            taula = taula.sort_values(col_gols, ascending=False).reset_index(drop=True)
+            resultats["Pichichi"] = [taula.iloc[0][col_pichichi]]
+            resultats["Gols Pichichi"] = int(taula.iloc[0][col_gols])
     return resultats
 
+def fusionar_resultats(excel_resultats, api_resultats):
+    merged = excel_resultats.copy()
+    merged["source"] = "API"
+    merged["api_error"] = api_resultats.get("api_error", "")
+    if api_resultats.get("group_positions"):
+        merged["group_positions"] = api_resultats["group_positions"]
+    for fase in ["Setzens", "Vuitens", "Quarts", "Semis", "Finalistes", "Campió", "MVP", "Pichichi"]:
+        if api_resultats.get(fase):
+            merged[fase] = api_resultats[fase]
+    if api_resultats.get("Gols Pichichi") is not None:
+        merged["Gols Pichichi"] = api_resultats.get("Gols Pichichi")
+    return merged
 
 def obtenir_resultats_actuals(df_resultats):
-    config_api = obtenir_config_api()
-    if config_api["use_api"] and config_api["api_key"]:
-        matches, error = carregar_matches_thestatsapi(config_api["api_key"], config_api["competition_id"], config_api["season_id"])
+    excel_resultats = construir_resultats_des_excel(df_resultats)
+    config = obtenir_config_api()
+    if config["use_api"] and config["api_key"]:
+        matches, error = carregar_matches_thestatsapi(config["api_key"], config["competition_id"], config["season_id"])
         if matches:
-            return construir_resultats_des_api(matches)
-        resultats = construir_resultats_des_excel(df_resultats)
-        resultats["api_error"] = error
-        return resultats
-    return construir_resultats_des_excel(df_resultats)
+            return fusionar_resultats(excel_resultats, construir_resultats_des_api(matches))
+        excel_resultats["api_error"] = error
+    return excel_resultats
 
-# Punt calc
+# ==================================================
+# CÀLCUL PUNTS API
+# ==================================================
 def punts_grup(pred, real_exacte, reals_altres, equips_classificats, es_tercer=False):
     pred = normalitzar_equip(pred)
     if not pred:
         return 0.0
     pred_norm = normalitzar_text(pred)
     real_exacte_norm = normalitzar_text(real_exacte)
-    equips_classificats_norm = {normalitzar_text(x) for x in equips_classificats if x}
-    altres_norm = {normalitzar_text(x) for x in reals_altres if x}
+    classificats = {normalitzar_text(x) for x in equips_classificats if x}
+    altres = {normalitzar_text(x) for x in reals_altres if x}
     if pred_norm == real_exacte_norm:
-        if es_tercer:
-            return 2.0 if pred_norm in equips_classificats_norm else 0.5
-        return 2.0
-    if pred_norm in altres_norm or pred_norm in equips_classificats_norm:
+        return 2.0 if (not es_tercer or pred_norm in classificats) else 0.5
+    if pred_norm in altres or pred_norm in classificats:
         return 1.0
     return 0.0
 
-
 def calcular_punts_participant_api(row, resultats):
-    punts_1r = punts_2n = punts_3r = 0.0
+    p1 = p2 = p3 = 0.0
     group_positions = resultats.get("group_positions", {})
     setzens = resultats.get("Setzens", [])
     for grup in list("ABCDEFGHIJKL"):
         real = group_positions.get(grup, {})
-        real_1r, real_2n, real_3r = real.get("1r", ""), real.get("2n", ""), real.get("3r", "")
-        punts_1r += punts_grup(row.get(f"Grup {grup} 1r", ""), real_1r, [real_2n, real_3r], setzens, False)
-        punts_2n += punts_grup(row.get(f"Grup {grup} 2n", ""), real_2n, [real_1r, real_3r], setzens, False)
-        punts_3r += punts_grup(row.get(f"Grup {grup} 3r", ""), real_3r, [real_1r, real_2n], setzens, True)
-    def punts_fase(prefix, quantitat, real_list, punts_per_encert=1.0):
-        total = 0.0
+        r1, r2, r3 = real.get("1r", ""), real.get("2n", ""), real.get("3r", "")
+        p1 += punts_grup(row.get(f"Grup {grup} 1r", ""), r1, [r2, r3], setzens, False)
+        p2 += punts_grup(row.get(f"Grup {grup} 2n", ""), r2, [r1, r3], setzens, False)
+        p3 += punts_grup(row.get(f"Grup {grup} 3r", ""), r3, [r1, r2], setzens, True)
+
+    def punts_fase(prefix, quantitat, real_list):
         real_norm = {normalitzar_text(x) for x in real_list if x}
+        total = 0.0
         for i in range(1, quantitat + 1):
             pred = normalitzar_equip(row.get(f"{prefix}_{i}", ""))
             if pred and normalitzar_text(pred) in real_norm:
-                total += punts_per_encert
+                total += 1.0
         return total
-    punts_setzens = punts_fase("Setzens", 32, resultats.get("Setzens", []), 1.0)
-    punts_vuitens = punts_fase("Vuitens", 16, resultats.get("Vuitens", []), 1.0)
-    punts_quarts = punts_fase("Quarts", 8, resultats.get("Quarts", []), 1.0)
-    punts_semis = punts_fase("Semis", 4, resultats.get("Semis", []), 1.0)
-    punts_finalistes = 0.0
-    finalistes_norm = {normalitzar_text(x) for x in resultats.get("Finalistes", []) if x}
+
+    ps = punts_fase("Setzens", 32, resultats.get("Setzens", []))
+    pv = punts_fase("Vuitens", 16, resultats.get("Vuitens", []))
+    pq = punts_fase("Quarts", 8, resultats.get("Quarts", []))
+    psem = punts_fase("Semis", 4, resultats.get("Semis", []))
+
+    pf = 0.0
+    finalistes = {normalitzar_text(x) for x in resultats.get("Finalistes", []) if x}
     for col in ["Final_1", "Final_2"]:
         pred = normalitzar_equip(row.get(col, ""))
-        if pred and normalitzar_text(pred) in finalistes_norm:
-            punts_finalistes += 1.0
-    campio = normalitzar_equip(row.get("Campió", ""))
-    campio_real_norm = {normalitzar_text(x) for x in resultats.get("Campió", []) if x}
-    punts_campio = 2.0 if campio and normalitzar_text(campio) in campio_real_norm else 0.0
-    punts_mvp = pd.to_numeric(row.get("Punts MVP", 0), errors="coerce")
-    punts_pichichi = pd.to_numeric(row.get("Punts Pichichi", 0), errors="coerce")
-    punts_resultat_final = pd.to_numeric(row.get("Resultat Final", 0), errors="coerce")
-    punts_mvp = 0.0 if pd.isna(punts_mvp) else float(punts_mvp)
-    punts_pichichi = 0.0 if pd.isna(punts_pichichi) else float(punts_pichichi)
-    punts_resultat_final = 0.0 if pd.isna(punts_resultat_final) else float(punts_resultat_final)
-    total = punts_1r + punts_2n + punts_3r + punts_setzens + punts_vuitens + punts_quarts + punts_semis + punts_finalistes + punts_campio + punts_mvp + punts_pichichi + punts_resultat_final
-    return {"Punts Grups 1r": round(punts_1r, 1), "Punts Grups 2n": round(punts_2n, 1), "Punts Grups 3r": round(punts_3r, 1), "Punts Setzens": round(punts_setzens, 1), "Punts Vuitens": round(punts_vuitens, 1), "Punts Quarts": round(punts_quarts, 1), "Punts Semis": round(punts_semis, 1), "Punts Finalistes": round(punts_finalistes, 1), "Punts Campió": round(punts_campio, 1), "Punts MVP": round(punts_mvp, 1), "Punts Pichichi": round(punts_pichichi, 1), "Resultat Final": round(punts_resultat_final, 1), "Total Punts": round(total, 1)}
+        if pred and normalitzar_text(pred) in finalistes:
+            pf += 1.0
 
+    campio = normalitzar_equip(row.get("Campió", ""))
+    campio_real = {normalitzar_text(x) for x in resultats.get("Campió", []) if x}
+    pc = 2.0 if campio and normalitzar_text(campio) in campio_real else 0.0
+
+    pmvp = pd.to_numeric(row.get("Punts MVP", 0), errors="coerce")
+    ppichichi = pd.to_numeric(row.get("Punts Pichichi", 0), errors="coerce")
+    presfinal = pd.to_numeric(row.get("Resultat Final", 0), errors="coerce")
+    pmvp = 0.0 if pd.isna(pmvp) else float(pmvp)
+    ppichichi = 0.0 if pd.isna(ppichichi) else float(ppichichi)
+    presfinal = 0.0 if pd.isna(presfinal) else float(presfinal)
+    total = p1 + p2 + p3 + ps + pv + pq + psem + pf + pc + pmvp + ppichichi + presfinal
+    return {
+        "Punts Grups 1r": round(p1, 1), "Punts Grups 2n": round(p2, 1), "Punts Grups 3r": round(p3, 1),
+        "Punts Setzens": round(ps, 1), "Punts Vuitens": round(pv, 1), "Punts Quarts": round(pq, 1), "Punts Semis": round(psem, 1),
+        "Punts Finalistes": round(pf, 1), "Punts Campió": round(pc, 1), "Punts MVP": round(pmvp, 1), "Punts Pichichi": round(ppichichi, 1),
+        "Resultat Final": round(presfinal, 1), "Total Punts": round(total, 1)
+    }
 
 def aplicar_recompte_api_a_porra(df_porra, resultats):
     if resultats.get("source") != "API":
@@ -527,15 +548,15 @@ def aplicar_recompte_api_a_porra(df_porra, resultats):
         df[col] = df_punts[col]
     return df
 
-# Ranking, snapshots and views are appended from a compact, validated block
-
-
+# ==================================================
+# RÀNQUINGS / MOVIMENTS / HISTÒRIC
+# ==================================================
 def recalcular_posicions(df):
     df = df.copy().sort_values("Punts", ascending=False).reset_index(drop=True)
     df["Posició"] = df.index + 1
-    df["Dif líder"] = (df["Punts"] - float(df["Punts"].iloc[0])).round(1) if not df.empty else 0
+    df["Punts"] = pd.to_numeric(df["Punts"], errors="coerce").fillna(0).round(1)
+    df["Dif líder"] = (df["Punts"] - float(df["Punts"].iloc[0])).round(1) if not df.empty else 0.0
     return df
-
 
 def crear_ranking_des_de_porra(df_porra):
     if "Participants" not in df_porra.columns or "Total Punts" not in df_porra.columns:
@@ -545,10 +566,10 @@ def crear_ranking_des_de_porra(df_porra):
     col_dep = obtenir_columna_departament(df_porra)
     cols = ["Participants", "Total Punts"] + ([col_dep] if col_dep else [])
     df = df_porra[cols].copy()
-    rename_map = {"Participants": "Participant", "Total Punts": "Punts"}
+    rename = {"Participants": "Participant", "Total Punts": "Punts"}
     if col_dep:
-        rename_map[col_dep] = "Departament"
-    df = df.rename(columns=rename_map)
+        rename[col_dep] = "Departament"
+    df = df.rename(columns=rename)
     df["Participant"] = df["Participant"].astype(str).str.strip()
     df["Punts"] = pd.to_numeric(df["Punts"], errors="coerce")
     if "Departament" in df.columns:
@@ -556,24 +577,31 @@ def crear_ranking_des_de_porra(df_porra):
     df = df.dropna(subset=["Punts"])
     df = df[df["Participant"] != ""]
     df = df[~df["Participant"].str.contains("Total", case=False, na=False)]
-    df["Punts"] = df["Punts"].round(1)
     return recalcular_posicions(df)
-
 
 def crear_ranking_departaments(df_ranking):
     if "Departament" not in df_ranking.columns:
         return pd.DataFrame()
     df = df_ranking.copy()
-    resum = df.groupby("Departament", as_index=False).agg(Participants=("Participant", "count"), Punts_totals=("Punts", "sum"), Mitjana_punts=("Punts", "mean"), Millor_puntuacio=("Punts", "max"))
+    resum = df.groupby("Departament", as_index=False).agg(
+        Participants=("Participant", "count"), Punts_totals=("Punts", "sum"), Mitjana_punts=("Punts", "mean"), Millor_puntuacio=("Punts", "max")
+    )
     lider = df.sort_values("Punts", ascending=False).drop_duplicates("Departament")[["Departament", "Participant"]].rename(columns={"Participant": "Líder departament"})
     resum = resum.merge(lider, on="Departament", how="left")
-    for c in ["Punts_totals", "Mitjana_punts", "Millor_puntuacio"]:
-        resum[c] = resum[c].round(1)
+    for col in ["Punts_totals", "Mitjana_punts", "Millor_puntuacio"]:
+        resum[col] = pd.to_numeric(resum[col], errors="coerce").fillna(0).round(1)
     resum = resum.sort_values(["Mitjana_punts", "Punts_totals"], ascending=[False, False]).reset_index(drop=True)
     resum["Posició"] = resum.index + 1
-    resum["Dif líder"] = (resum["Mitjana_punts"] - float(resum["Mitjana_punts"].iloc[0])).round(1) if not resum.empty else 0
+    resum["Dif líder"] = (resum["Mitjana_punts"] - float(resum["Mitjana_punts"].iloc[0])).round(1) if not resum.empty else 0.0
     return resum[["Posició", "Departament", "Participants", "Mitjana_punts", "Punts_totals", "Millor_puntuacio", "Líder departament", "Dif líder"]]
 
+def ranking_signature(df_ranking, resultats_actuals):
+    cols = ["Participant", "Punts", "Posició"]
+    if "Departament" in df_ranking.columns:
+        cols.append("Departament")
+    payload = df_ranking[cols].sort_values("Participant").to_json(orient="records", force_ascii=False)
+    payload += json.dumps({k: resultats_actuals.get(k) for k in ["source", "Setzens", "Vuitens", "Quarts", "Semis", "Finalistes", "Campió"]}, ensure_ascii=False, sort_keys=True)
+    return hashlib.md5(payload.encode("utf-8")).hexdigest()
 
 def carregar_csv_segura(path):
     try:
@@ -581,47 +609,104 @@ def carregar_csv_segura(path):
     except Exception:
         return pd.DataFrame()
 
+def carregar_meta_snapshot():
+    if not os.path.exists(SNAPSHOT_META_FILE):
+        return {}
+    try:
+        with open(SNAPSHOT_META_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
 
-def aplicar_moviment(df_ranking, excel_mtime):
+def guardar_meta_snapshot(snapshot_key):
+    with open(SNAPSHOT_META_FILE, "w", encoding="utf-8") as f:
+        json.dump({"snapshot_key": snapshot_key, "updated_at": datetime.now(tz=ZoneInfo("Europe/Madrid")).isoformat()}, f, ensure_ascii=False, indent=2)
+
+def guardar_snapshot_actual(df_ranking):
+    cols = ["Participant", "Punts", "Posició"] + (["Departament"] if "Departament" in df_ranking.columns else [])
+    df_ranking[cols].rename(columns={"Punts": "Punts anteriors", "Posició": "Posició anterior"}).to_csv(SNAPSHOT_CURRENT_FILE, index=False)
+
+def guardar_snapshot_display(df_ranking):
+    cols = ["Participant", "Canvi posició", "Canvi punts", "Canvi num posició", "Punts anteriors", "Posició anterior"]
+    df_ranking[[c for c in cols if c in df_ranking.columns]].to_csv(SNAPSHOT_DISPLAY_FILE, index=False)
+
+def aplicar_moviment(df_ranking, snapshot_key):
     df = df_ranking.copy()
-    df["Posició anterior"] = df["Posició"]
-    df["Punts anteriors"] = df["Punts"]
-    df["Canvi punts"] = 0.0
-    df["Canvi num posició"] = 0
-    df["Canvi posició"] = "⚪ —"
+    meta = carregar_meta_snapshot()
+    if meta.get("snapshot_key") == snapshot_key:
+        df_mov = carregar_csv_segura(SNAPSHOT_DISPLAY_FILE)
+        if not df_mov.empty and "Participant" in df_mov.columns:
+            df = df.merge(df_mov, on="Participant", how="left")
+            df["Canvi posició"] = df["Canvi posició"].fillna("⚪ —")
+            df["Canvi punts"] = pd.to_numeric(df["Canvi punts"], errors="coerce").fillna(0.0).round(1)
+            return df
+    prev = carregar_csv_segura(SNAPSHOT_CURRENT_FILE)
+    if prev.empty or "Participant" not in prev.columns:
+        df["Posició anterior"] = df["Posició"]
+        df["Punts anteriors"] = df["Punts"]
+        df["Canvi punts"] = 0.0
+        df["Canvi num posició"] = 0
+        df["Canvi posició"] = "⚪ —"
+    else:
+        prev["Participant"] = prev["Participant"].astype(str).str.strip()
+        df = df.merge(prev, on="Participant", how="left")
+        df["Punts anteriors"] = pd.to_numeric(df["Punts anteriors"], errors="coerce")
+        df["Posició anterior"] = pd.to_numeric(df["Posició anterior"], errors="coerce")
+        df["Canvi punts"] = (df["Punts"] - df["Punts anteriors"]).fillna(0).round(1)
+        df["Canvi num posició"] = (df["Posició anterior"] - df["Posició"]).fillna(0).astype(int)
+        df["Canvi posició"] = df["Canvi num posició"].apply(lambda x: f"🟢 ▲ +{x}" if x > 0 else (f"🔴 ▼ {x}" if x < 0 else "⚪ —"))
+    guardar_snapshot_actual(df)
+    guardar_snapshot_display(df)
+    guardar_meta_snapshot(snapshot_key)
     return df
-
 
 def aplicar_moviment_departament(df_dep_actual, df_ranking_global, departament):
     df = df_dep_actual.copy()
-    df["Canvi posició"] = "⚪ —"
-    df["Canvi punts"] = 0.0
+    for col in ["Punts anteriors", "Posició anterior", "Punts anteriors dep", "Posició anterior dep", "Canvi punts", "Canvi num posició", "Canvi posició"]:
+        if col in df.columns:
+            df = df.drop(columns=[col])
+    if "Punts anteriors" not in df_ranking_global.columns or "Departament" not in df_ranking_global.columns:
+        df["Canvi posició"] = "⚪ —"
+        df["Canvi punts"] = 0.0
+        return df
+    prev = df_ranking_global[df_ranking_global["Departament"].astype(str).str.strip() == str(departament).strip()].copy()
+    prev["Punts anteriors"] = pd.to_numeric(prev.get("Punts anteriors"), errors="coerce")
+    prev = prev.dropna(subset=["Punts anteriors"])
+    if prev.empty:
+        df["Canvi posició"] = "⚪ —"
+        df["Canvi punts"] = 0.0
+        return df
+    prev = prev.sort_values("Punts anteriors", ascending=False).reset_index(drop=True)
+    prev["Posició anterior dep"] = prev.index + 1
+    prev = prev[["Participant", "Punts anteriors", "Posició anterior dep"]].rename(columns={"Punts anteriors": "Punts anteriors dep"})
+    df = df.merge(prev, on="Participant", how="left")
+    df["Punts anteriors dep"] = pd.to_numeric(df["Punts anteriors dep"], errors="coerce")
+    df["Posició anterior dep"] = pd.to_numeric(df["Posició anterior dep"], errors="coerce")
+    df["Canvi punts"] = (df["Punts"] - df["Punts anteriors dep"]).fillna(0).round(1)
+    df["Canvi num posició"] = (df["Posició anterior dep"] - df["Posició"]).fillna(0).astype(int)
+    df["Canvi posició"] = df["Canvi num posició"].apply(lambda x: f"🟢 ▲ +{x}" if x > 0 else (f"🔴 ▼ {x}" if x < 0 else "⚪ —"))
     return df
-
 
 def carregar_historic():
     return carregar_csv_segura(HISTORY_FILE)
 
-
-def registrar_historic(df_ranking, excel_mtime, data_actualitzacio):
-    df_hist = carregar_historic()
-    # Minimal safe history: do not duplicate same mtime
-    if not df_hist.empty and "excel_mtime" in df_hist.columns:
-        mtimes = pd.to_numeric(df_hist["excel_mtime"], errors="coerce").dropna().astype(float).unique()
-        if float(excel_mtime) in mtimes:
-            return df_hist
+def registrar_historic(df_ranking, snapshot_key):
+    hist = carregar_historic()
+    if not hist.empty and "snapshot_key" in hist.columns and snapshot_key in hist["snapshot_key"].astype(str).values:
+        return hist
     cols = ["Participant", "Punts", "Posició"] + (["Departament"] if "Departament" in df_ranking.columns else [])
-    df_nou = df_ranking[cols].copy()
-    df_nou["excel_mtime"] = float(excel_mtime)
-    df_nou["Actualització"] = str(data_actualitzacio)
-    df_hist = df_nou if df_hist.empty else pd.concat([df_hist, df_nou], ignore_index=True)
-    df_hist.to_csv(HISTORY_FILE, index=False)
-    return df_hist
+    nou = df_ranking[cols].copy()
+    nou["snapshot_key"] = snapshot_key
+    nou["Actualització"] = datetime.now(tz=ZoneInfo("Europe/Madrid")).strftime("%d/%m/%Y %H:%M")
+    hist = nou if hist.empty else pd.concat([hist, nou], ignore_index=True)
+    hist.to_csv(HISTORY_FILE, index=False)
+    return hist
 
-
+# ==================================================
+# VISUALS
+# ==================================================
 def highlight_leader(row):
     return ["background-color: #ffe066; font-weight: bold;" if row.get("Posició") == 1 else "" for _ in row]
-
 
 def mostrar_taula_ranking(df):
     cols = ["Posició", "Canvi posició", "Participant"]
@@ -629,69 +714,103 @@ def mostrar_taula_ranking(df):
         cols.append("Departament")
     cols += ["Punts", "Dif líder", "Canvi punts"]
     cols = [c for c in cols if c in df.columns]
-    df_display = df[cols].copy()
+    d = df[cols].copy()
     for c in ["Punts", "Dif líder", "Canvi punts"]:
-        if c in df_display.columns:
-            df_display[c] = pd.to_numeric(df_display[c], errors="coerce").fillna(0).round(1)
-    st.dataframe(df_display.style.apply(highlight_leader, axis=1), use_container_width=True, hide_index=True)
-
+        if c in d.columns:
+            d[c] = pd.to_numeric(d[c], errors="coerce").fillna(0).round(1)
+    fmt = {c: "{:.1f}" for c in ["Punts", "Dif líder"] if c in d.columns}
+    if "Canvi punts" in d.columns:
+        fmt["Canvi punts"] = "{:+.1f}"
+    st.dataframe(d.style.apply(highlight_leader, axis=1).format(fmt), use_container_width=True, hide_index=True)
 
 def mostrar_taula_departaments(df_dep):
     if df_dep.empty:
         st.info("Afegeix una columna 'Departament' al full Porra per activar aquest mode.")
         return
-    st.dataframe(df_dep, use_container_width=True, hide_index=True)
-
+    d = df_dep.copy()
+    for c in ["Mitjana_punts", "Punts_totals", "Millor_puntuacio", "Dif líder"]:
+        if c in d.columns:
+            d[c] = pd.to_numeric(d[c], errors="coerce").fillna(0).round(1)
+    st.dataframe(d.style.apply(highlight_leader, axis=1).format({c: "{:.1f}" for c in ["Mitjana_punts", "Punts_totals", "Millor_puntuacio", "Dif líder"] if c in d.columns}), use_container_width=True, hide_index=True)
 
 def mostrar_grafic_punts(df, color="#0b70c9", altura_minima=950):
     if df.empty:
         return
     data = df[["Participant", "Punts", "Posició", "Dif líder"]].copy().sort_values("Punts", ascending=False)
-    chart = alt.Chart(data).mark_bar(color=color).encode(x=alt.X("Punts:Q", title="Punts", scale=alt.Scale(zero=False)), y=alt.Y("Participant:N", sort="-x", title=None), tooltip=["Posició", "Participant", alt.Tooltip("Punts:Q", format=".1f"), alt.Tooltip("Dif líder:Q", format=".1f")]).properties(height=max(altura_minima, len(data) * 36))
+    data["Punts"] = pd.to_numeric(data["Punts"], errors="coerce").fillna(0).round(1)
+    chart = alt.Chart(data).mark_bar(color=color).encode(
+        x=alt.X("Punts:Q", title="Punts", scale=alt.Scale(zero=False)),
+        y=alt.Y("Participant:N", sort="-x", title=None),
+        tooltip=["Posició", "Participant", alt.Tooltip("Punts:Q", format=".1f"), alt.Tooltip("Dif líder:Q", format=".1f")]
+    ).properties(height=max(altura_minima, len(data) * 36))
     st.altair_chart(chart, use_container_width=True)
-
 
 def mostrar_grafic_departaments(df_dep):
     if df_dep.empty:
         return
     data = df_dep.copy().sort_values("Mitjana_punts", ascending=False)
-    chart = alt.Chart(data).mark_bar(color="#0f9d58").encode(x=alt.X("Mitjana_punts:Q", title="Mitjana de punts", scale=alt.Scale(zero=False)), y=alt.Y("Departament:N", sort="-x", title=None), tooltip=list(data.columns)).properties(height=max(350, len(data) * 46))
+    chart = alt.Chart(data).mark_bar(color="#0f9d58").encode(
+        x=alt.X("Mitjana_punts:Q", title="Mitjana de punts", scale=alt.Scale(zero=False)),
+        y=alt.Y("Departament:N", sort="-x", title=None),
+        tooltip=list(data.columns)
+    ).properties(height=max(350, len(data) * 46))
     st.altair_chart(chart, use_container_width=True)
-
 
 def mostrar_evolucio_temporal(df_hist, df_ranking):
     st.subheader("📉 Evolució temporal")
     if df_hist.empty or "Actualització" not in df_hist.columns or df_hist["Actualització"].nunique() < 2:
-        st.info("Encara no hi ha històric suficient.")
+        st.info("Encara no hi ha històric suficient. Es registrarà quan canviïn els punts o les posicions.")
         return
     participants_sel = st.multiselect("Selecciona participants", sorted(df_hist["Participant"].astype(str).unique()), default=df_ranking.head(5)["Participant"].tolist())
     if not participants_sel:
         return
     data = df_hist[df_hist["Participant"].isin(participants_sel)].copy()
     data["Punts"] = pd.to_numeric(data["Punts"], errors="coerce")
-    chart = alt.Chart(data).mark_line(point=True).encode(x="Actualització:N", y="Punts:Q", color="Participant:N", tooltip=["Actualització", "Participant", "Punts", "Posició"]).properties(height=420)
+    data["Posició"] = pd.to_numeric(data["Posició"], errors="coerce")
+    ordre = list(data["Actualització"].drop_duplicates())
+    st.write("### 📈 Evolució de punts")
+    chart = alt.Chart(data).mark_line(point=True).encode(
+        x=alt.X("Actualització:N", sort=ordre, title="Actualització"), y=alt.Y("Punts:Q", title="Punts"), color="Participant:N",
+        tooltip=["Actualització", "Participant", alt.Tooltip("Punts:Q", format=".1f"), "Posició"]
+    ).properties(height=420)
     st.altair_chart(chart, use_container_width=True)
-
+    st.write("### 📉 Evolució de posició")
+    chart2 = alt.Chart(data).mark_line(point=True).encode(
+        x=alt.X("Actualització:N", sort=ordre, title="Actualització"), y=alt.Y("Posició:Q", title="Posició", scale=alt.Scale(reverse=True)), color="Participant:N",
+        tooltip=["Actualització", "Participant", "Posició", alt.Tooltip("Punts:Q", format=".1f")]
+    ).properties(height=420)
+    st.altair_chart(chart2, use_container_width=True)
 
 def mostrar_animacio_evolucio(df_hist):
     st.subheader("📽️ Animació evolució del rànquing")
     if df_hist.empty or "Actualització" not in df_hist.columns or df_hist["Actualització"].nunique() < 2:
         st.info("Calen almenys dues versions per reproduir l’animació.")
         return
-
+    max_pos = st.slider("Nombre de posicions a mostrar", 5, 20, 10, 1)
+    if st.button("▶️ Reproduir evolució"):
+        placeholder = st.empty()
+        for act in df_hist["Actualització"].drop_duplicates():
+            frame = df_hist[df_hist["Actualització"] == act].copy()
+            frame["Posició"] = pd.to_numeric(frame["Posició"], errors="coerce")
+            frame["Punts"] = pd.to_numeric(frame["Punts"], errors="coerce").round(1)
+            frame = frame.sort_values("Posició").head(max_pos)
+            with placeholder.container():
+                st.write(f"### 🕒 {act}")
+                st.dataframe(frame[["Posició", "Participant", "Punts"]], use_container_width=True, hide_index=True)
 
 def obtenir_pichichi_real(df_resultats_display, col_pichichi, col_gols):
-    if col_pichichi not in df_resultats_display.columns or col_gols not in df_resultats_display.columns:
+    cp = trobar_columna_flexible(df_resultats_display, col_pichichi)
+    cg = trobar_columna_flexible(df_resultats_display, col_gols)
+    if not cp or not cg:
         return "Pendent", "Pendent"
-    taula = df_resultats_display[[col_pichichi, col_gols]].copy()
-    taula[col_pichichi] = taula[col_pichichi].astype(str).str.strip()
-    taula[col_gols] = pd.to_numeric(taula[col_gols], errors="coerce")
-    taula = taula[(taula[col_pichichi] != "") & (~taula[col_pichichi].str.lower().isin(["nan", "nat", "pendent"])) & (taula[col_gols] >= 1)]
+    taula = df_resultats_display[[cp, cg]].copy()
+    taula[cp] = taula[cp].astype(str).str.strip()
+    taula[cg] = pd.to_numeric(taula[cg], errors="coerce")
+    taula = taula[(taula[cp] != "") & (~taula[cp].str.lower().isin(["nan", "nat", "pendent"])) & (taula[cg] >= 1)]
     if taula.empty:
         return "Pendent", "Pendent"
-    taula = taula.sort_values(col_gols, ascending=False).reset_index(drop=True)
-    return taula.iloc[0][col_pichichi], str(int(taula.iloc[0][col_gols]))
-
+    taula = taula.sort_values(cg, ascending=False).reset_index(drop=True)
+    return taula.iloc[0][cp], str(int(taula.iloc[0][cg]))
 
 def obtenir_prediccions_fase(df_j, prefix, quantitat):
     files = []
@@ -701,12 +820,10 @@ def obtenir_prediccions_fase(df_j, prefix, quantitat):
         files.append({"Posició": i, "Equip": afegir_bandera(valor)})
     return pd.DataFrame(files)
 
-
 def mostrar_prediccions_eliminatoria_participant(df_j):
     st.write("### 🧭 Prediccions fase eliminatòria")
     tabs = st.tabs(["Setzens", "Vuitens", "Quarts", "Semis", "Final", "Campió"])
-    phases = [("Setzens", 32), ("Vuitens", 16), ("Quarts", 8), ("Semis", 4)]
-    for idx, (prefix, qty) in enumerate(phases):
+    for idx, (prefix, qty) in enumerate([("Setzens", 32), ("Vuitens", 16), ("Quarts", 8), ("Semis", 4)]):
         with tabs[idx]:
             st.dataframe(obtenir_prediccions_fase(df_j, prefix, qty), use_container_width=True, hide_index=True)
     with tabs[4]:
@@ -716,9 +833,8 @@ def mostrar_prediccions_eliminatoria_participant(df_j):
         campio = valor_o_pendent(df_j["Campió"].values[0]) if "Campió" in df_j.columns else "Pendent"
         st.dataframe(pd.DataFrame({"Concepte": ["Campió previst"], "Equip": [afegir_bandera(campio)]}), use_container_width=True, hide_index=True)
 
-
 def mostrar_fase_eliminatoria_responsive(files_eliminatoria):
-    if len(files_eliminatoria) == 0:
+    if not files_eliminatoria:
         st.info("No hi ha dades de fase eliminatòria configurades.")
         return
     html_files = ""
@@ -728,12 +844,14 @@ def mostrar_fase_eliminatoria_responsive(files_eliminatoria):
         if resultat == "" or normalitzar_text(resultat) == "pendent":
             equips_html = "<span class='elim-pending'>Pendent</span>"
         else:
-            equips = [x.strip() for x in resultat.split(" · ") if x.strip() != ""]
+            equips = [x.strip() for x in resultat.split(" · ") if x.strip()]
             equips_html = "".join([f"<span class='elim-badge'>{equip}</span>" for equip in equips])
         html_files += f"<div class='elim-row'><div class='elim-phase'>{fase}</div><div class='elim-teams'>{equips_html}</div></div>"
     st.markdown(f"<div class='elim-wrapper'>{html_files}</div>", unsafe_allow_html=True)
 
-# Styles
+# ==================================================
+# ESTILS
+# ==================================================
 img_base64 = carregar_imatge_base64(BACKGROUND_IMAGE)
 if img_base64:
     background_css = f"""
@@ -762,31 +880,46 @@ h1,h2,h3,h4,h5,h6 {{ color: #102a43; text-shadow: 0px 1px 2px rgba(255,255,255,0
 </style>
 """, unsafe_allow_html=True)
 
-# Data load
+# ==================================================
+# SIDEBAR
+# ==================================================
+with st.sidebar:
+    st.write("### ⚙️ Gestió")
+    if st.button("🔄 Reiniciar comparativa de moviments"):
+        for fitxer in [SNAPSHOT_CURRENT_FILE, SNAPSHOT_DISPLAY_FILE, SNAPSHOT_META_FILE]:
+            if os.path.exists(fitxer):
+                os.remove(fitxer)
+        st.rerun()
+    if st.button("🧹 Reiniciar històric d’evolució"):
+        if os.path.exists(HISTORY_FILE):
+            os.remove(HISTORY_FILE)
+        st.rerun()
+    st.markdown("---")
+    st.caption("Mode híbrid: Excel manual + API TheStatsAPI opcional.")
+
+# ==================================================
+# CARREGAR DADES
+# ==================================================
 excel_mtime = os.path.getmtime(EXCEL_FILE) if os.path.exists(EXCEL_FILE) else 0
 data_actualitzacio = obtenir_data_actualitzacio_fitxer(EXCEL_FILE)
 df_porra_original, df_resultats = carregar_dades(EXCEL_FILE, excel_mtime)
 resultats_actuals = obtenir_resultats_actuals(df_resultats)
 df_porra = aplicar_recompte_api_a_porra(df_porra_original, resultats_actuals)
-df_ranking = crear_ranking_des_de_porra(df_porra)
-df_ranking = aplicar_moviment(df_ranking, excel_mtime)
-df_historic = registrar_historic(df_ranking, excel_mtime, data_actualitzacio)
+df_ranking_base = crear_ranking_des_de_porra(df_porra)
+snapshot_key = ranking_signature(df_ranking_base, resultats_actuals)
+df_ranking = aplicar_moviment(df_ranking_base, snapshot_key)
+df_historic = registrar_historic(df_ranking_base, snapshot_key)
 df_departaments = crear_ranking_departaments(df_ranking)
 num_participants = len(df_ranking)
 premi_guanyador = num_participants * PREU_PARTICIPACIO
 te_departaments = "Departament" in df_ranking.columns and not df_departaments.empty
 
-# Header
+# ==================================================
+# CAPÇALERA
+# ==================================================
 st.markdown('<p class="title">🏆 PORRA MUNDIAL</p>', unsafe_allow_html=True)
 st.markdown('<p class="subtitle">Classificació en viu, resultats Excel/API, competició per departaments i resultats reals</p>', unsafe_allow_html=True)
-if resultats_actuals.get("source") == "API":
-    st.success("Mode resultats: API TheStatsAPI activada.")
-else:
-    st.info("Mode resultats: Excel. L’app utilitza el full 'Resultats Reals' del fitxer Excel.")
-if resultats_actuals.get("api_error"):
-    st.warning(f"L'API no ha retornat dades vàlides i s'ha fet servir Excel. Detall: {resultats_actuals.get('api_error')}")
 
-# Cards
 info1, info2, info3 = st.columns(3, gap="small")
 info1.markdown(f"<div class='card darkcard'><h3>🕒 Dades actualitzades</h3><h1>{data_actualitzacio}</h1></div>", unsafe_allow_html=True)
 info2.markdown(f"<div class='card greencard'><h3>🎁 Premi guanyador</h3><h1>{premi_guanyador} €</h1><p>{num_participants} participants x {PREU_PARTICIPACIO} €</p></div>", unsafe_allow_html=True)
@@ -796,6 +929,9 @@ if te_departaments:
     dept_lider = df_departaments.iloc[0]
     st.markdown(f"<div class='card purplecard'><h3>🏢 Departament líder</h3><h1>{dept_lider['Departament']}</h1><p>Mitjana {float(dept_lider['Mitjana_punts']):.1f} punts · {int(dept_lider['Participants'])} participants</p></div>", unsafe_allow_html=True)
 
+# ==================================================
+# RÀNQUING
+# ==================================================
 st.subheader("🥇 TOP 3 General")
 top3 = df_ranking.head(3)
 top_cols = st.columns(3, gap="small")
@@ -808,12 +944,16 @@ for i, (klass, medal) in enumerate(zip(["gold", "silver", "bronze"], ["🥇", "�
 
 st.subheader("📊 Classificació general")
 mostrar_taula_ranking(df_ranking)
+
 st.subheader("📈 Gràfic general de punts")
 mostrar_grafic_punts(df_ranking, color="#0b70c9", altura_minima=1000)
-mostrar_evolucio_temporal(df_historic, df_ranking)
+
+mostrar_evolucio_temporal(df_historic, df_ranking_base)
 mostrar_animacio_evolucio(df_historic)
 
-# Participant detail
+# ==================================================
+# FITXA PARTICIPANT
+# ==================================================
 st.subheader("👤 Fitxa participant")
 participants_porra = df_porra["Participants"].dropna().astype(str).unique()
 jugador = st.selectbox("Selecciona participant", participants_porra, index=None, placeholder="Selecciona un participant...")
@@ -849,7 +989,9 @@ if jugador is not None:
 else:
     st.info("Selecciona un participant per veure el detall de punts i prediccions.")
 
-# Department
+# ==================================================
+# DEPARTAMENTS
+# ==================================================
 st.subheader("🏢 Competició per departaments")
 if te_departaments:
     st.write("Rànquing calculat per **mitjana de punts** del departament.")
@@ -868,7 +1010,9 @@ if te_departaments:
 else:
     st.info("Per activar aquest apartat, afegeix una columna 'Departament' al full Porra.")
 
-# Custom league
+# ==================================================
+# LLIGUETA
+# ==================================================
 st.subheader("🏟️ Lligueta personalitzada")
 tots_participants = df_ranking["Participant"].dropna().astype(str).tolist()
 participants_filtrats = st.multiselect("Selecciona participants per crear una lligueta:", options=tots_participants, default=[], placeholder="Tria participants...")
@@ -881,7 +1025,9 @@ if participants_filtrats:
 else:
     st.write("Selecciona participants per crear una classificació reduïda tipus lligueta.")
 
-# Results
+# ==================================================
+# RESULTATS REALS
+# ==================================================
 st.subheader("✅ Resultats reals")
 df_resultats_display = preparar_taula_buida(df_resultats)
 COL_GRUP = "Grup"; COL_POSICIO = "Posició"; COL_EQUIP = "Equip"; COL_SETZENS = "Setzens"; COL_VUITENS = "Vuitens"; COL_QUARTS = "Quarts"; COL_SEMIS = "Semis"; COL_FINALISTES = "Finalistes"; COL_CAMPIO = "Campió"; COL_MVP = "MVP"; COL_RESULTAT_FINAL = "Resultat Final"; COL_PICHICHI = "Jugador Pichichi"; COL_GOLS = "Gols"
@@ -909,9 +1055,10 @@ group_positions = resultats_actuals.get("group_positions", {})
 if group_positions:
     for grup, posicions in group_positions.items():
         grups[f"Grup {grup}"] = {"1r": afegir_bandera(posicions.get("1r", "")) if posicions.get("1r") else "", "2n": afegir_bandera(posicions.get("2n", "")) if posicions.get("2n") else "", "3r": afegir_bandera(posicions.get("3r", "")) if posicions.get("3r") else ""}
-elif all(col in df_resultats_display.columns for col in [COL_GRUP, COL_POSICIO, COL_EQUIP]):
+elif all(trobar_columna_flexible(df_resultats_display, c) for c in [COL_GRUP, COL_POSICIO, COL_EQUIP]):
+    cg, cp, ce = trobar_columna_flexible(df_resultats_display, COL_GRUP), trobar_columna_flexible(df_resultats_display, COL_POSICIO), trobar_columna_flexible(df_resultats_display, COL_EQUIP)
     for _, row in df_resultats_display.iterrows():
-        grup = str(row.get(COL_GRUP, "")).strip(); posicio = str(row.get(COL_POSICIO, "")).strip(); equip = str(row.get(COL_EQUIP, "")).strip()
+        grup = str(row.get(cg, "")).strip(); posicio = str(row.get(cp, "")).strip(); equip = str(row.get(ce, "")).strip()
         if not grup or not equip:
             continue
         grups.setdefault(grup, {"1r": "", "2n": "", "3r": ""})
@@ -930,37 +1077,43 @@ st.write("### ⚔️ Fase eliminatòria")
 fases_eliminatoria = [COL_SETZENS, COL_VUITENS, COL_QUARTS, COL_SEMIS, COL_FINALISTES, COL_CAMPIO, COL_MVP]
 files_eliminatoria = []
 for fase in fases_eliminatoria:
-    if fase in ["Setzens", "Vuitens", "Quarts", "Semis", "Finalistes", "Campió"] and resultats_actuals.get(fase):
+    if resultats_actuals.get(fase):
         valors = resultats_actuals.get(fase, [])
-        detall = "Pendent" if len(valors) == 0 else " · ".join([afegir_bandera(v) for v in valors])
-    elif fase in df_resultats_display.columns:
-        valors = llista_valors_no_buits(df_resultats_display, fase)
-        if len(valors) == 0 or (len(valors) == 1 and normalitzar_text(valors[0]) == "pendent"):
-            detall = "Pendent"
-        else:
-            detall = " · ".join(valors) if fase == COL_MVP else " · ".join([afegir_bandera(v) for v in valors])
+        detall = " · ".join([afegir_bandera(v) for v in valors]) if fase != COL_MVP else " · ".join(valors)
     else:
-        continue
+        detall = "Pendent"
     files_eliminatoria.append({"Fase": fase, "Resultat": detall})
 mostrar_fase_eliminatoria_responsive(files_eliminatoria)
 
 st.write("### ⚽ Jugador pichichi")
-if COL_PICHICHI in df_resultats_display.columns and COL_GOLS in df_resultats_display.columns:
-    taula_pichichi = df_resultats_display[[COL_PICHICHI, COL_GOLS]].copy()
-    taula_pichichi[COL_PICHICHI] = taula_pichichi[COL_PICHICHI].astype(str).str.strip()
-    taula_pichichi[COL_GOLS] = pd.to_numeric(taula_pichichi[COL_GOLS], errors="coerce")
-    taula_pichichi = taula_pichichi[(taula_pichichi[COL_PICHICHI] != "") & (~taula_pichichi[COL_PICHICHI].str.lower().isin(["nan", "nat", "pendent"])) & (taula_pichichi[COL_GOLS] >= 1)]
+col_pichichi = trobar_columna_flexible(df_resultats_display, COL_PICHICHI)
+col_gols = trobar_columna_flexible(df_resultats_display, COL_GOLS)
+if col_pichichi and col_gols:
+    taula_pichichi = df_resultats_display[[col_pichichi, col_gols]].copy()
+    taula_pichichi[col_pichichi] = taula_pichichi[col_pichichi].astype(str).str.strip()
+    taula_pichichi[col_gols] = pd.to_numeric(taula_pichichi[col_gols], errors="coerce")
+    taula_pichichi = taula_pichichi[(taula_pichichi[col_pichichi] != "") & (~taula_pichichi[col_pichichi].str.lower().isin(["nan", "nat", "pendent"])) & (taula_pichichi[col_gols] >= 1)]
     if taula_pichichi.empty:
         taula_pichichi = pd.DataFrame({COL_PICHICHI: ["Pendent"], COL_GOLS: ["Pendent"]})
     else:
-        taula_pichichi = taula_pichichi.sort_values(COL_GOLS, ascending=False)
-        taula_pichichi[COL_GOLS] = taula_pichichi[COL_GOLS].astype("Int64")
+        taula_pichichi = taula_pichichi.sort_values(col_gols, ascending=False)
+        taula_pichichi[col_gols] = taula_pichichi[col_gols].astype("Int64")
+        taula_pichichi = taula_pichichi.rename(columns={col_pichichi: COL_PICHICHI, col_gols: COL_GOLS})
     st.dataframe(taula_pichichi, use_container_width=True, hide_index=True)
 else:
-    st.dataframe(pd.DataFrame({"Jugador Pichichi": ["Pendent"], "Gols": ["Pendent"]}), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame({COL_PICHICHI: ["Pendent"], COL_GOLS: ["Pendent"]}), use_container_width=True, hide_index=True)
 
 st.write("### 🏁 Resultat de la final")
 st.dataframe(pd.DataFrame({"Concepte": ["Resultat de la final"], "Valor": [primer_valor_o_pendent(df_resultats_display, COL_RESULTAT_FINAL)]}), use_container_width=True, hide_index=True)
 
+# ==================================================
+# ESTAT API AL FINAL
+# ==================================================
 st.markdown("---")
+if resultats_actuals.get("source") == "API":
+    st.success("Mode resultats: API TheStatsAPI activada. Si alguna fase no té dades API, es completa amb el full Excel.")
+else:
+    st.info("Mode resultats: Excel. L’app utilitza el full 'Resultats Reals' del fitxer Excel.")
+if resultats_actuals.get("api_error"):
+    st.warning(f"Error API: {resultats_actuals.get('api_error')}. L’app ha continuat amb Excel.")
 st.write("📡 Actualització automàtica des de Excel / API TheStatsAPI")
