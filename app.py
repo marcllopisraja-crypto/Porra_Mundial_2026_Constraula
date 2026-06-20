@@ -746,8 +746,7 @@ def obtenir_pichichi_real(df_resultats_display, col_pichichi, col_gols):
 
     taula = taula[
         (taula[col_pichichi] != "") &
-        (~taula[col_pichichi].str.lower().isin(["nan", "nat", "pendent"])) &
-        (taula[col_gols] >= 1)
+        (~taula[col_pichichi].str.lower().isin(["nan", "nat", "pendent"]))
     ]
 
     if taula.empty:
@@ -756,9 +755,12 @@ def obtenir_pichichi_real(df_resultats_display, col_pichichi, col_gols):
     taula = taula.sort_values(col_gols, ascending=False).reset_index(drop=True)
 
     jugador = taula.iloc[0][col_pichichi]
-    gols = int(taula.iloc[0][col_gols])
+    gols = taula.iloc[0][col_gols]
+    
+    if pd.isna(gols):
+        return "Pendent", "Pendent"
 
-    return jugador, str(gols)
+    return jugador, str(int(gols))
 
 
 def obtenir_prediccions_fase(df_j, prefix, quantitat):
@@ -1216,7 +1218,7 @@ if jugador is not None:
             "Finalistes": pd.to_numeric(df_j["Punts Finalistes"].values[0], errors="coerce"),
             "Campió": pd.to_numeric(df_j["Punts Campió"].values[0], errors="coerce"),
             "MVP": pd.to_numeric(df_j["Punts MVP"].values[0], errors="coerce"),
-            "Pichichi": pd.to_numeric(df_j["Punts Pichichi"].values[0], errors="coerce"),
+            "Bota d'Or": pd.to_numeric(df_j["Punts Pichichi"].values[0], errors="coerce") if "Punts Pichichi" in df_j.columns else 0,
         }
 
         punts_categoria = pd.DataFrame({
@@ -1253,7 +1255,9 @@ if jugador is not None:
         c2.write(f"🏆 Campió: {afegir_bandera(valor_o_pendent(df_j['Campió'].values[0]))}")
         c2.write(f"📌 Resultat final: {resultat_final}")
         c2.write(f"⭐ MVP: {valor_o_pendent(df_j['MVP'].values[0])}")
-        c2.write(f"⚽ Pichichi: {valor_o_pendent(df_j['Pichichi'].values[0])}")
+        
+        val_bota = valor_o_pendent(df_j['Pichichi'].values[0]) if 'Pichichi' in df_j.columns else "Pendent"
+        c2.write(f"⚽ Bota d'Or: {val_bota}")
 
         mostrar_prediccions_grups_participant(df_j)
         mostrar_prediccions_eliminatoria_participant(df_j)
@@ -1373,7 +1377,7 @@ COL_MVP = "MVP"
 
 COL_RESULTAT_FINAL = "Resultat Final"
 
-COL_PICHICHI = "Jugador Pichichi"
+COL_PICHICHI = "Jugador Pichichi" # Mantenim la lectura de l'Excel original
 COL_GOLS = "Gols"
 
 
@@ -1419,7 +1423,7 @@ pichichi_subtext = f"{gols_pichichi} gols" if gols_pichichi != "Pendent" else "P
 r3.markdown(
     f"""
     <div class='card bronze'>
-        <h3>⚽ Pichichi</h3>
+        <h3>⚽ Bota d'Or</h3>
         <h1 style='font-size:25px'>{pichichi_real}</h1>
         <p>{pichichi_subtext}</p>
     </div>
@@ -1532,9 +1536,9 @@ else:
 
 
 # --------------------------------------------------
-# PICHICHI
+# BOTA D'OR (TAULA LLISTAT)
 # --------------------------------------------------
-st.write("### ⚽ Jugador pichichi")
+st.write("### ⚽ Bota d'Or")
 
 if COL_PICHICHI in df_resultats_display.columns and COL_GOLS in df_resultats_display.columns:
     taula_pichichi = df_resultats_display[[COL_PICHICHI, COL_GOLS]].copy()
@@ -1545,20 +1549,23 @@ if COL_PICHICHI in df_resultats_display.columns and COL_GOLS in df_resultats_dis
         errors="coerce"
     )
 
+    # Nova regla: No filtrem si els gols són < 1. S'ensenya tothom que tingui un nom valid.
     taula_pichichi = taula_pichichi[
         (taula_pichichi[COL_PICHICHI] != "") &
-        (~taula_pichichi[COL_PICHICHI].str.lower().isin(["nan", "nat", "pendent"])) &
-        (taula_pichichi[COL_GOLS] >= 1)
+        (~taula_pichichi[COL_PICHICHI].str.lower().isin(["nan", "nat", "pendent"]))
     ]
 
     if taula_pichichi.empty:
         taula_pichichi = pd.DataFrame({
-            COL_PICHICHI: ["Pendent"],
-            COL_GOLS: ["Pendent"]
+            "Jugador": ["Pendent"],
+            "Gols": ["Pendent"]
         })
     else:
-        taula_pichichi = taula_pichichi.sort_values(COL_GOLS, ascending=False)
-        taula_pichichi[COL_GOLS] = taula_pichichi[COL_GOLS].astype("Int64")
+        taula_pichichi = taula_pichichi.sort_values(COL_GOLS, ascending=False).reset_index(drop=True)
+        # Els jugadors sense número els hi posem un 0 perquè no quedin lletjos ("<NA>")
+        taula_pichichi[COL_GOLS] = taula_pichichi[COL_GOLS].fillna(0).astype("Int64")
+        # Canviem el nom de la columna original només per visualitzar
+        taula_pichichi = taula_pichichi.rename(columns={COL_PICHICHI: "Jugador"})
 
     st.dataframe(
         taula_pichichi,
@@ -1567,7 +1574,7 @@ if COL_PICHICHI in df_resultats_display.columns and COL_GOLS in df_resultats_dis
     )
 else:
     taula_pichichi = pd.DataFrame({
-        "Jugador Pichichi": ["Pendent"],
+        "Jugador": ["Pendent"],
         "Gols": ["Pendent"]
     })
 
