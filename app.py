@@ -779,6 +779,56 @@ def obtenir_prediccions_fase(df_j, prefix, quantitat):
 
     return pd.DataFrame(files)
 
+def mostrar_prediccions_grups_participant(df_j):
+    st.write("### 🧩 Prediccions fase de grups")
+    
+    grups_possibles = "ABCDEFGHIJKL"
+    grups_dict = {}
+    
+    for grup in grups_possibles:
+        grup_trobat = False
+        grup_data = {"1r": "", "2n": "", "3r": ""}
+        
+        for col in df_j.columns:
+            col_n = normalitzar_text(col)
+            if "punt" in col_n: 
+                continue
+            
+            # Buscar possibles noms com "grup a 1r", "grup a-2n", "a1", "a 2", etc.
+            es_grup_actual = (
+                f"grup {grup.lower()}" in col_n or 
+                f"grup_{grup.lower()}" in col_n or
+                f"grup-{grup.lower()}" in col_n or
+                col_n.startswith(f"{grup.lower()} ") or
+                col_n.startswith(f"{grup.lower()}1") or
+                col_n.startswith(f"{grup.lower()}2") or
+                col_n.startswith(f"{grup.lower()}3")
+            )
+            
+            if es_grup_actual:
+                if "1" in col_n:
+                    grup_data["1r"] = afegir_bandera(valor_o_pendent(df_j[col].values[0]))
+                    grup_trobat = True
+                elif "2" in col_n:
+                    grup_data["2n"] = afegir_bandera(valor_o_pendent(df_j[col].values[0]))
+                    grup_trobat = True
+                elif "3" in col_n:
+                    grup_data["3r"] = afegir_bandera(valor_o_pendent(df_j[col].values[0]))
+                    grup_trobat = True
+        
+        if grup_trobat:
+            grups_dict[f"Grup {grup}"] = grup_data
+            
+    if grups_dict:
+        df_g = pd.DataFrame(grups_dict)
+        # Fixem les files de l'1 al 3 independentment per alinear visualment correcte
+        df_g = df_g.reindex(["1r", "2n", "3r"])
+        df_g = df_g.reset_index().rename(columns={"index": "Posició"})
+        
+        st.dataframe(df_g, use_container_width=True, hide_index=True)
+    else:
+        st.info("No s'han detectat dades de la fase de grups per a aquest participant.")
+        st.caption("Assegura't que les columnes a l'Excel de Porra es diuen 'Grup A 1r', 'Grup B 2n', etc.")
 
 def mostrar_prediccions_eliminatoria_participant(df_j):
     st.write("### 🧭 Prediccions fase eliminatòria")
@@ -1205,6 +1255,7 @@ if jugador is not None:
         c2.write(f"⭐ MVP: {valor_o_pendent(df_j['MVP'].values[0])}")
         c2.write(f"⚽ Pichichi: {valor_o_pendent(df_j['Pichichi'].values[0])}")
 
+        mostrar_prediccions_grups_participant(df_j)
         mostrar_prediccions_eliminatoria_participant(df_j)
 
 else:
