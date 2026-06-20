@@ -24,6 +24,12 @@ SNAPSHOT_CURRENT_FILE = "ranking_snapshot_current.csv"
 SNAPSHOT_DISPLAY_FILE = "ranking_snapshot_display.csv"
 SNAPSHOT_META_FILE = "ranking_snapshot_meta.json"
 
+# --- SISTEMA DE SEGURETAT ANTI-PANTALLA BLANCA ---
+if not os.path.exists(EXCEL_FILE):
+    st.error(f"❌ No s'ha trobat l'arxiu de dades: **{EXCEL_FILE}**")
+    st.warning("Revisa que l'arxiu estigui pujat a GitHub a la carpeta principal i que les majúscules i minúscules del nom coincideixin exactament.")
+    st.stop()
+
 
 # --------------------------------------------------
 # BOTÓ RESET SNAPSHOT
@@ -192,7 +198,7 @@ def obtenir_data_actualitzacio_fitxer(path):
     timestamp = os.path.getmtime(path)
     dt = datetime.fromtimestamp(timestamp, tz=ZoneInfo("Europe/Madrid"))
 
-    return dt.strftime("%d/%m/%Y")
+    return dt.strftime("%d/%m/%Y %H:%M")
 
 
 def llista_valors_no_buits(df, columna):
@@ -283,16 +289,13 @@ def recalcular_posicions(df):
 def crear_ranking_des_de_porra(df_porra):
     if "Participants" not in df_porra.columns:
         st.error("No s'ha trobat la columna 'Participants' al full Porra.")
-        st.write("Columnes detectades:", list(df_porra.columns))
         st.stop()
 
     if "Total Punts" not in df_porra.columns:
         st.error("No s'ha trobat la columna 'Total Punts' al full Porra.")
-        st.write("Columnes detectades:", list(df_porra.columns))
         st.stop()
 
     col_dep = obtenir_columna_departament(df_porra)
-
     cols_base = ["Participants", "Total Punts"]
 
     if col_dep is not None:
@@ -392,7 +395,6 @@ def crear_ranking_departaments(df_ranking):
 def carregar_meta_snapshot():
     if not os.path.exists(SNAPSHOT_META_FILE):
         return {}
-
     try:
         with open(SNAPSHOT_META_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -405,7 +407,6 @@ def guardar_meta_snapshot(excel_mtime):
         "excel_mtime": float(excel_mtime),
         "updated_at": datetime.now(tz=ZoneInfo("Europe/Madrid")).isoformat()
     }
-
     with open(SNAPSHOT_META_FILE, "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
 
@@ -413,7 +414,6 @@ def guardar_meta_snapshot(excel_mtime):
 def carregar_csv_segura(path):
     if not os.path.exists(path):
         return pd.DataFrame()
-
     try:
         return pd.read_csv(path)
     except Exception:
@@ -422,13 +422,11 @@ def carregar_csv_segura(path):
 
 def guardar_snapshot_actual(df_ranking):
     cols = ["Participant", "Punts", "Posició"]
-
     df_snapshot = df_ranking[cols].copy()
     df_snapshot = df_snapshot.rename(columns={
         "Punts": "Punts anteriors",
         "Posició": "Posició anterior"
     })
-
     df_snapshot.to_csv(SNAPSHOT_CURRENT_FILE, index=False)
 
 
@@ -442,9 +440,7 @@ def guardar_snapshot_display(df_ranking):
         "Punts anteriors",
         "Posició anterior"
     ]
-
     cols_existents = [c for c in cols if c in df_ranking.columns]
-
     df_display = df_ranking[cols_existents].copy()
     df_display.to_csv(SNAPSHOT_DISPLAY_FILE, index=False)
 
@@ -465,7 +461,7 @@ def aplicar_moviment(df_ranking, excel_mtime):
     meta = carregar_meta_snapshot()
     meta_mtime = meta.get("excel_mtime", None)
 
-    # Si l'Excel no ha canviat, recuperem el moviment guardat
+    # 1. Si l'Excel no ha canviat, recuperem el moviment guardat
     if meta_mtime is not None and float(meta_mtime) == float(excel_mtime):
         df_mov = carregar_csv_segura(SNAPSHOT_DISPLAY_FILE)
 
@@ -501,7 +497,7 @@ def aplicar_moviment(df_ranking, excel_mtime):
         guardar_meta_snapshot(excel_mtime)
         return df_actual
 
-    # Si l'Excel HA CANVIAT, comparem contra l'últim snapshot
+    # 2. Si l'Excel HA CANVIAT, comparem contra l'últim snapshot
     df_prev = carregar_csv_segura(SNAPSHOT_CURRENT_FILE)
 
     if df_prev.empty or "Participant" not in df_prev.columns:
@@ -589,7 +585,6 @@ def mostrar_taula_ranking(df):
     cols.append("Punts")
     cols.append("Dif líder")
 
-    # Canvi punts al final
     if "Canvi punts" in df.columns:
         cols.append("Canvi punts")
 
@@ -700,14 +695,4 @@ def mostrar_grafic_punts(df, color="#0b70c9", altura_minima=950):
                 alt.Tooltip("Dif líder:Q", title="Dif. líder", format=".1f")
             ]
         )
-        .properties(height=chart_height)
-    )
-
-    st.altair_chart(chart, use_container_width=True)
-
-
-def mostrar_grafic_departaments(df_dep):
-    if df_dep.empty:
-        return
-
-    ch
+        .properties
