@@ -460,7 +460,6 @@ def aplicar_moviment(df_ranking, excel_mtime):
     meta = carregar_meta_snapshot()
     meta_mtime = meta.get("excel_mtime", None)
 
-    # 1. Si l'Excel no ha canviat, recuperem el moviment guardat per visualitzar
     if meta_mtime is not None and float(meta_mtime) == float(excel_mtime):
         df_mov = carregar_csv_segura(SNAPSHOT_DISPLAY_FILE)
 
@@ -488,14 +487,12 @@ def aplicar_moviment(df_ranking, excel_mtime):
 
             return df_actual
 
-        # Si falla alguna cosa, posem neutral
         df_actual = posar_neutral(df_actual)
         guardar_snapshot_actual(df_actual)
         guardar_snapshot_display(df_actual)
         guardar_meta_snapshot(excel_mtime)
         return df_actual
 
-    # 2. Si l'Excel HA CANVIAT, comparem contra l'últim snapshot
     df_prev = carregar_csv_segura(SNAPSHOT_CURRENT_FILE)
 
     if df_prev.empty or "Participant" not in df_prev.columns:
@@ -508,20 +505,17 @@ def aplicar_moviment(df_ranking, excel_mtime):
     df_prev["Participant"] = df_prev["Participant"].astype(str).str.strip()
     df_actual = df_actual.merge(df_prev, on="Participant", how="left")
 
-    # Convertim a numèric i calculem diferències temporals
     df_actual["Punts anteriors"] = pd.to_numeric(df_actual["Punts anteriors"], errors="coerce")
     df_actual["Posició anterior"] = pd.to_numeric(df_actual["Posició anterior"], errors="coerce")
 
     df_actual["Canvi punts"] = (df_actual["Punts"] - df_actual["Punts anteriors"]).round(1)
     df_actual["Canvi posició"] = (df_actual["Posició anterior"] - df_actual["Posició"]).fillna(0)
 
-    # 3. LÒGICA INTEL·LIGENT: S'han actualitzat les dades però la classificació és idèntica?
     sense_canvis_punts = df_actual["Canvi punts"].fillna(0).eq(0).all()
     sense_canvis_pos = df_actual["Canvi posició"].fillna(0).eq(0).all()
     mateix_num_participants = len(df_actual) == len(df_prev)
 
     if sense_canvis_punts and sense_canvis_pos and mateix_num_participants:
-        # Recuperem els diferencials anteriors per no posar fletxes blanques innecessàries
         df_old_display = carregar_csv_segura(SNAPSHOT_DISPLAY_FILE)
         
         if not df_old_display.empty and "Participant" in df_old_display.columns:
@@ -530,11 +524,9 @@ def aplicar_moviment(df_ranking, excel_mtime):
             df_actual["Evolució"] = df_actual["Evolució"].fillna("⚪ —")
             df_actual["Canvi punts"] = pd.to_numeric(df_actual["Canvi punts"], errors="coerce").fillna(0.0).round(1)
             
-            # Només actualitzem el meta per marcar l'Excel com a processat, però NO sobreescrivim el snapshot base
             guardar_meta_snapshot(excel_mtime)
             return df_actual
 
-    # 4. Si realment HI HA CANVIS, calculem els indicadors unificats nous
     df_actual["Canvi punts"] = pd.to_numeric(df_actual["Canvi punts"], errors="coerce").fillna(0.0).round(1)
 
     def evolucio_unificada(row):
@@ -551,7 +543,6 @@ def aplicar_moviment(df_ranking, excel_mtime):
 
     df_actual["Evolució"] = df_actual.apply(evolucio_unificada, axis=1)
 
-    # Guardem l'estat per a la propera vegada
     guardar_snapshot_actual(df_actual)
     guardar_snapshot_display(df_actual)
     guardar_meta_snapshot(excel_mtime)
@@ -582,7 +573,6 @@ def mostrar_taula_ranking(df):
     cols.append("Punts")
     cols.append("Dif líder")
 
-    # Canvi punts al final
     if "Canvi punts" in df.columns:
         cols.append("Canvi punts")
 
@@ -666,12 +656,22 @@ def mostrar_taula_departaments(df_dep):
 
 
 def mostrar_grafic_punts(df, color_scheme="blues", altura_minima=950):
+    if df.empty:
+        return
+        
     chart_data = df[["Posició", "Participant", "Punts", "Dif líder"]].copy()
+    chart_data["Punts"] = pd.to_numeric(chart_data["Punts"], errors="coerce").fillna(0.0)
     chart_data = chart_data.sort_values("Punts", ascending=False)
 
     chart_height = max(altura_minima, len(chart_data) * 40)
+    
+    # Càlcul segur del límit de l'eix afegint sempre un 15% d'aire net a la dreta
+    max_p = chart_data["Punts"].max()
+    if pd.isna(max_p) or max_p <= 0:
+        max_dom = 10.0
+    else:
+        max_dom = float(max_p * 1.15) 
 
-    # 1. Barres modernes: vores arrodonides i degradat de color
     bars = alt.Chart(chart_data).mark_bar(
         cornerRadiusEnd=6,
         height=22
@@ -679,7 +679,7 @@ def mostrar_grafic_punts(df, color_scheme="blues", altura_minima=950):
         x=alt.X(
             "Punts:Q", 
             title="Punts", 
-            scale=alt.Scale(zero=False), 
+            scale=alt.Scale(domain=[0.0, max_dom]), 
             axis=alt.Axis(grid=True, gridColor="#f0f2f6", domain=False)
         ),
         y=alt.Y(
@@ -701,11 +701,10 @@ def mostrar_grafic_punts(df, color_scheme="blues", altura_minima=950):
         ]
     )
 
-    # 2. Text amb els punts al final de cada barra
     text = bars.mark_text(
         align='left',
         baseline='middle',
-        dx=5,  # Desplaçament cap a la dreta
+        dx=8,  
         fontSize=12,
         fontWeight='bold',
         color='#334e68'
@@ -713,7 +712,6 @@ def mostrar_grafic_punts(df, color_scheme="blues", altura_minima=950):
         text=alt.Text('Punts:Q', format='.1f')
     )
 
-    # Unim les barres i el text, i traiem la línia negra exterior
     chart = (bars + text).properties(height=chart_height).configure_view(strokeWidth=0)
     st.altair_chart(chart, use_container_width=True, theme="streamlit")
 
@@ -722,8 +720,18 @@ def mostrar_grafic_departaments(df_dep, color_scheme="purples"):
     if df_dep.empty:
         return
 
-    chart_data = df_dep.copy().sort_values("Mitjana_punts", ascending=False)
+    chart_data = df_dep.copy()
+    chart_data["Mitjana_punts"] = pd.to_numeric(chart_data["Mitjana_punts"], errors="coerce").fillna(0.0)
+    chart_data = chart_data.sort_values("Mitjana_punts", ascending=False)
+    
     chart_height = max(350, len(chart_data) * 46)
+
+    # Càlcul segur del límit de l'eix afegint sempre un 15% d'aire net a la dreta
+    max_p = chart_data["Mitjana_punts"].max()
+    if pd.isna(max_p) or max_p <= 0:
+        max_dom = 10.0
+    else:
+        max_dom = float(max_p * 1.15)
 
     bars = alt.Chart(chart_data).mark_bar(
         cornerRadiusEnd=6,
@@ -732,7 +740,7 @@ def mostrar_grafic_departaments(df_dep, color_scheme="purples"):
         x=alt.X(
             "Mitjana_punts:Q",
             title="Mitjana de punts",
-            scale=alt.Scale(zero=False),
+            scale=alt.Scale(domain=[0.0, max_dom]),
             axis=alt.Axis(grid=True, gridColor="#f0f2f6", domain=False)
         ),
         y=alt.Y(
@@ -759,7 +767,7 @@ def mostrar_grafic_departaments(df_dep, color_scheme="purples"):
     text = bars.mark_text(
         align='left',
         baseline='middle',
-        dx=5,
+        dx=8,
         fontSize=13,
         fontWeight='bold',
         color='#334e68'
@@ -788,17 +796,12 @@ def obtenir_pichichi_real(df_resultats_display, col_pichichi, col_gols):
     if taula.empty:
         return "Pendent", "Pendent"
 
-    # Busquem el número màxim de gols de la taula
     max_gols = taula[col_gols].max()
 
-    # Si no hi ha cap gol registrat o és 0, ho tractem com a "Pendent" pel bàner
     if pd.isna(max_gols) or max_gols <= 0:
         return "Pendent", "Pendent"
 
-    # Filtrem només els jugadors que tinguin els gols màxims (per si hi ha empats)
     jugadors_top = taula[taula[col_gols] == max_gols][col_pichichi].tolist()
-    
-    # Els ajuntem tots amb un punt de separació
     jugador = " · ".join(jugadors_top)
 
     return jugador, str(int(max_gols))
@@ -822,6 +825,7 @@ def obtenir_prediccions_fase(df_j, prefix, quantitat):
 
     return pd.DataFrame(files)
 
+
 def mostrar_prediccions_grups_participant(df_j):
     st.write("### 🧩 Prediccions fase de grups")
     
@@ -837,7 +841,6 @@ def mostrar_prediccions_grups_participant(df_j):
             if "punt" in col_n: 
                 continue
             
-            # Buscar possibles noms com "grup a 1r", "grup a-2n", "a1", "a 2", etc.
             es_grup_actual = (
                 f"grup {grup.lower()}" in col_n or 
                 f"grup_{grup.lower()}" in col_n or
@@ -864,7 +867,6 @@ def mostrar_prediccions_grups_participant(df_j):
             
     if grups_dict:
         df_g = pd.DataFrame(grups_dict)
-        # Fixem les files de l'1 al 3 independentment per alinear visualment correcte
         df_g = df_g.reindex(["1r", "2n", "3r"])
         df_g = df_g.reset_index().rename(columns={"index": "Posició"})
         
@@ -872,6 +874,7 @@ def mostrar_prediccions_grups_participant(df_j):
     else:
         st.info("No s'han detectat dades de la fase de grups per a aquest participant.")
         st.caption("Assegura't que les columnes a l'Excel de Porra es diuen 'Grup A 1r', 'Grup B 2n', etc.")
+
 
 def mostrar_prediccions_eliminatoria_participant(df_j):
     st.write("### 🧭 Prediccions fase eliminatòria")
@@ -976,7 +979,6 @@ st.markdown(
         margin-bottom: 25px;
     }}
 
-    /* CLASSES NOVES DE GRAELLA PER MANTENIR ALTURES IGUALS */
     .card-grid-3 {{
         display: grid;
         grid-template-columns: repeat(3, 1fr);
@@ -998,7 +1000,7 @@ st.markdown(
         border-radius: 18px;
         text-align: center;
         box-shadow: 0px 4px 20px rgba(0,0,0,0.18);
-        height: 100% !important; /* Això força que s'estirin per igual */
+        height: 100% !important; 
         min-height: 178px;
         display: flex;
         flex-direction: column;
@@ -1017,36 +1019,12 @@ st.markdown(
         cursor: pointer !important;
     }}
 
-    .gold {{
-        background: linear-gradient(135deg, #ffd700, #fff1a8);
-        color: #111;
-    }}
-
-    .silver {{
-        background: linear-gradient(135deg, #c0c0c0, #f2f2f2);
-        color: #111;
-    }}
-
-    .bronze {{
-        background: linear-gradient(135deg, #cd7f32, #f0b27a);
-        color: white;
-    }}
-
-    .bluecard {{
-        background: linear-gradient(135deg, #0b70c9, #7cc5ff);
-        color: white;
-    }}
-
-    .greencard {{
-        background: linear-gradient(135deg, #0f9d58, #8ee6b3);
-        color: white;
-    }}
-
-    .darkcard {{
-        background: linear-gradient(135deg, #102a43, #486581);
-        color: white;
-    }}
-
+    .gold {{ background: linear-gradient(135deg, #ffd700, #fff1a8); color: #111; }}
+    .silver {{ background: linear-gradient(135deg, #c0c0c0, #f2f2f2); color: #111; }}
+    .bronze {{ background: linear-gradient(135deg, #cd7f32, #f0b27a); color: white; }}
+    .bluecard {{ background: linear-gradient(135deg, #0b70c9, #7cc5ff); color: white; }}
+    .greencard {{ background: linear-gradient(135deg, #0f9d58, #8ee6b3); color: white; }}
+    .darkcard {{ background: linear-gradient(135deg, #102a43, #486581); color: white; }}
     .purplecard {{
         background: linear-gradient(135deg, #6f42c1, #b982ff);
         color: white;
@@ -1098,17 +1076,9 @@ st.markdown(
             min-height: 140px;
         }}
 
-        .card h3 {{
-            white-space: normal;
-        }}
-
-        .card h1 {{
-            white-space: normal;
-        }}
-
-        .card p {{
-            white-space: normal;
-        }}
+        .card h3 {{ white-space: normal; }}
+        .card h1 {{ white-space: normal; }}
+        .card p {{ white-space: normal; }}
     }}
     </style>
     """,
@@ -1265,9 +1235,15 @@ if jugador is not None:
             "Punts": list(punts_dict.values())
         })
 
-        punts_categoria["Punts"] = punts_categoria["Punts"].fillna(0).round(1)
+        punts_categoria["Punts"] = pd.to_numeric(punts_categoria["Punts"], errors="coerce").fillna(0.0).round(1)
 
-        # Gràfic vertical modern per la fitxa
+        # Càlcul de padding dinàmic 100% segur per l'eix Y
+        max_p_cat = punts_categoria["Punts"].max()
+        if pd.isna(max_p_cat) or max_p_cat <= 0:
+            max_dom_cat = 10.0
+        else:
+            max_dom_cat = float(max_p_cat * 1.2)
+
         bars_cat = alt.Chart(punts_categoria).mark_bar(
             cornerRadiusEnd=6,
             size=25
@@ -1281,6 +1257,7 @@ if jugador is not None:
             y=alt.Y(
                 "Punts:Q", 
                 title="Punts", 
+                scale=alt.Scale(domain=[0.0, max_dom_cat]),
                 axis=alt.Axis(grid=True, gridColor="#f0f2f6", domain=False)
             ),
             color=alt.Color(
@@ -1297,7 +1274,7 @@ if jugador is not None:
         text_cat = bars_cat.mark_text(
             align='center',
             baseline='bottom',
-            dy=-5,
+            dy=-8,
             fontSize=12,
             fontWeight='bold',
             color='#334e68'
@@ -1322,7 +1299,6 @@ if jugador is not None:
         
         val_bota = valor_o_pendent(df_j['Pichichi'].values[0]) if 'Pichichi' in df_j.columns else "Pendent"
         
-        # BUSQUEM ELS GOLS REALS QUE TÉ AQUEST JUGADOR ARA MATEIX
         gols_bota_str = ""
         COL_PICHICHI = "Jugador Pichichi"
         COL_GOLS = "Gols"
@@ -1452,7 +1428,7 @@ COL_MVP = "MVP"
 
 COL_RESULTAT_FINAL = "Resultat Final"
 
-COL_PICHICHI = "Jugador Pichichi" # Mantenim la lectura de l'Excel original
+COL_PICHICHI = "Jugador Pichichi" 
 COL_GOLS = "Gols"
 
 
@@ -1571,7 +1547,7 @@ else:
 
 
 # --------------------------------------------------
-# BOTA D'OR (TAULA LLISTAT SENSE SCROLL)
+# BOTA D'OR 
 # --------------------------------------------------
 st.write("### ⚽ Bota d'Or")
 
@@ -1599,14 +1575,13 @@ if COL_PICHICHI in df_resultats_display.columns and COL_GOLS in df_resultats_dis
         taula_pichichi[COL_GOLS] = taula_pichichi[COL_GOLS].fillna(0).astype("Int64")
         taula_pichichi = taula_pichichi.rename(columns={COL_PICHICHI: "Jugador"})
 
-    # Càlcul d'alçada dinàmica: 35px per fila + uns 40px extres de capçalera
     altura_taula_pichichi = (len(taula_pichichi) * 35) + 40
 
     st.dataframe(
         taula_pichichi,
         use_container_width=True,
         hide_index=True,
-        height=altura_taula_pichichi # Fixa l'alçada per evitar l'scroll
+        height=altura_taula_pichichi 
     )
 else:
     taula_pichichi = pd.DataFrame({
