@@ -18,6 +18,7 @@ st.set_page_config(
 
 EXCEL_FILE = "Porra_Mundial_Final_Definitiva.xlsx"
 BACKGROUND_IMAGE = "fifa-Trionda.jpg"
+LOGO_IMAGE = "Logo RGB fondo transparente letra negra Constraula.png"
 PREU_PARTICIPACIO = 5
 
 SNAPSHOT_CURRENT_FILE = "ranking_snapshot_current.csv"
@@ -664,75 +665,110 @@ def mostrar_taula_departaments(df_dep):
     )
 
 
-def mostrar_grafic_punts(df, color="#0b70c9", altura_minima=950):
+def mostrar_grafic_punts(df, color_scheme="blues", altura_minima=950):
     chart_data = df[["Posició", "Participant", "Punts", "Dif líder"]].copy()
     chart_data = chart_data.sort_values("Punts", ascending=False)
 
-    chart_height = max(altura_minima, len(chart_data) * 36)
+    chart_height = max(altura_minima, len(chart_data) * 40)
 
-    chart = (
-        alt.Chart(chart_data)
-        .mark_bar(color=color)
-        .encode(
-            x=alt.X(
-                "Punts:Q",
-                title="Punts",
-                scale=alt.Scale(zero=False)
-            ),
-            y=alt.Y(
-                "Participant:N",
-                sort="-x",
-                title=None,
-                axis=alt.Axis(labelLimit=560, labelFontSize=12)
-            ),
-            tooltip=[
-                alt.Tooltip("Posició:Q", title="Posició"),
-                alt.Tooltip("Participant:N", title="Participant"),
-                alt.Tooltip("Punts:Q", title="Punts", format=".1f"),
-                alt.Tooltip("Dif líder:Q", title="Dif. líder", format=".1f")
-            ]
-        )
-        .properties(height=chart_height)
+    # 1. Barres modernes: vores arrodonides i degradat de color
+    bars = alt.Chart(chart_data).mark_bar(
+        cornerRadiusEnd=6,
+        height=22
+    ).encode(
+        x=alt.X(
+            "Punts:Q", 
+            title="Punts", 
+            scale=alt.Scale(zero=False), 
+            axis=alt.Axis(grid=True, gridColor="#f0f2f6", domain=False)
+        ),
+        y=alt.Y(
+            "Participant:N", 
+            sort="-x", 
+            title=None, 
+            axis=alt.Axis(labelLimit=560, labelFontSize=12, tickSize=0, domain=False)
+        ),
+        color=alt.Color(
+            "Punts:Q", 
+            scale=alt.Scale(scheme=color_scheme), 
+            legend=None
+        ),
+        tooltip=[
+            alt.Tooltip("Posició:Q", title="Posició"),
+            alt.Tooltip("Participant:N", title="Participant"),
+            alt.Tooltip("Punts:Q", title="Punts", format=".1f"),
+            alt.Tooltip("Dif líder:Q", title="Dif. líder", format=".1f")
+        ]
     )
 
-    st.altair_chart(chart, use_container_width=True)
+    # 2. Text amb els punts al final de cada barra
+    text = bars.mark_text(
+        align='left',
+        baseline='middle',
+        dx=5,  # Desplaçament cap a la dreta
+        fontSize=12,
+        fontWeight='bold',
+        color='#334e68'
+    ).encode(
+        text=alt.Text('Punts:Q', format='.1f')
+    )
+
+    # Unim les barres i el text, i traiem la línia negra exterior
+    chart = (bars + text).properties(height=chart_height).configure_view(strokeWidth=0)
+    st.altair_chart(chart, use_container_width=True, theme="streamlit")
 
 
-def mostrar_grafic_departaments(df_dep):
+def mostrar_grafic_departaments(df_dep, color_scheme="purples"):
     if df_dep.empty:
         return
 
     chart_data = df_dep.copy().sort_values("Mitjana_punts", ascending=False)
     chart_height = max(350, len(chart_data) * 46)
 
-    chart = (
-        alt.Chart(chart_data)
-        .mark_bar(color="#0f9d58")
-        .encode(
-            x=alt.X(
-                "Mitjana_punts:Q",
-                title="Mitjana de punts",
-                scale=alt.Scale(zero=False)
-            ),
-            y=alt.Y(
-                "Departament:N",
-                sort="-x",
-                title=None,
-                axis=alt.Axis(labelLimit=560, labelFontSize=13)
-            ),
-            tooltip=[
-                alt.Tooltip("Posició:Q", title="Posició"),
-                alt.Tooltip("Departament:N", title="Departament"),
-                alt.Tooltip("Participants:Q", title="Participants"),
-                alt.Tooltip("Mitjana_punts:Q", title="Mitjana punts", format=".1f"),
-                alt.Tooltip("Punts_totals:Q", title="Punts totals", format=".1f"),
-                alt.Tooltip("Líder departament:N", title="Líder departament")
-            ]
-        )
-        .properties(height=chart_height)
+    bars = alt.Chart(chart_data).mark_bar(
+        cornerRadiusEnd=6,
+        height=26
+    ).encode(
+        x=alt.X(
+            "Mitjana_punts:Q",
+            title="Mitjana de punts",
+            scale=alt.Scale(zero=False),
+            axis=alt.Axis(grid=True, gridColor="#f0f2f6", domain=False)
+        ),
+        y=alt.Y(
+            "Departament:N",
+            sort="-x",
+            title=None,
+            axis=alt.Axis(labelLimit=560, labelFontSize=13, tickSize=0, domain=False)
+        ),
+        color=alt.Color(
+            "Mitjana_punts:Q", 
+            scale=alt.Scale(scheme=color_scheme), 
+            legend=None
+        ),
+        tooltip=[
+            alt.Tooltip("Posició:Q", title="Posició"),
+            alt.Tooltip("Departament:N", title="Departament"),
+            alt.Tooltip("Participants:Q", title="Participants"),
+            alt.Tooltip("Mitjana_punts:Q", title="Mitjana punts", format=".1f"),
+            alt.Tooltip("Punts_totals:Q", title="Punts totals", format=".1f"),
+            alt.Tooltip("Líder departament:N", title="Líder departament")
+        ]
+    )
+    
+    text = bars.mark_text(
+        align='left',
+        baseline='middle',
+        dx=5,
+        fontSize=13,
+        fontWeight='bold',
+        color='#334e68'
+    ).encode(
+        text=alt.Text('Mitjana_punts:Q', format='.1f')
     )
 
-    st.altair_chart(chart, use_container_width=True)
+    chart = (bars + text).properties(height=chart_height).configure_view(strokeWidth=0)
+    st.altair_chart(chart, use_container_width=True, theme="streamlit")
 
 
 def obtenir_pichichi_real(df_resultats_display, col_pichichi, col_gols):
@@ -752,15 +788,20 @@ def obtenir_pichichi_real(df_resultats_display, col_pichichi, col_gols):
     if taula.empty:
         return "Pendent", "Pendent"
 
-    taula = taula.sort_values(col_gols, ascending=False).reset_index(drop=True)
+    # Busquem el número màxim de gols de la taula
+    max_gols = taula[col_gols].max()
 
-    jugador = taula.iloc[0][col_pichichi]
-    gols = taula.iloc[0][col_gols]
-    
-    if pd.isna(gols):
+    # Si no hi ha cap gol registrat o és 0, ho tractem com a "Pendent" pel bàner
+    if pd.isna(max_gols) or max_gols <= 0:
         return "Pendent", "Pendent"
 
-    return jugador, str(int(gols))
+    # Filtrem només els jugadors que tinguin els gols màxims (per si hi ha empats)
+    jugadors_top = taula[taula[col_gols] == max_gols][col_pichichi].tolist()
+    
+    # Els ajuntem tots amb un punt de separació
+    jugador = " · ".join(jugadors_top)
+
+    return jugador, str(int(max_gols))
 
 
 def obtenir_prediccions_fase(df_j, prefix, quantitat):
@@ -890,7 +931,7 @@ img_base64 = carregar_imatge_base64(BACKGROUND_IMAGE)
 if img_base64:
     background_css = f"""
     background-image:
-        linear-gradient(rgba(0,0,0,0.52), rgba(0,0,0,0.72)),
+        linear-gradient(rgba(0,0,0,0.15), rgba(0,0,0,0.35)),
         url("data:image/jpg;base64,{img_base64}");
     background-size: cover;
     background-position: center;
@@ -910,7 +951,10 @@ st.markdown(
     .block-container {{
         padding-top: 2rem;
         padding-bottom: 2rem;
-        background: rgba(255,255,255,0.92);
+        background: rgba(255, 255, 255, 0.65); 
+        backdrop-filter: blur(12px); 
+        -webkit-backdrop-filter: blur(12px); 
+        border: 1px solid rgba(255, 255, 255, 0.3);
         border-radius: 24px;
         margin-top: 24px;
         margin-bottom: 24px;
@@ -932,12 +976,29 @@ st.markdown(
         margin-bottom: 25px;
     }}
 
+    /* CLASSES NOVES DE GRAELLA PER MANTENIR ALTURES IGUALS */
+    .card-grid-3 {{
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1.5rem;
+        align-items: stretch;
+        margin-bottom: 1rem;
+    }}
+    
+    .card-grid-4 {{
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 1.5rem;
+        align-items: stretch;
+        margin-bottom: 1rem;
+    }}
+
     .card {{
         padding: 18px;
         border-radius: 18px;
         text-align: center;
         box-shadow: 0px 4px 20px rgba(0,0,0,0.18);
-        height: 178px;
+        height: 100% !important; /* Això força que s'estirin per igual */
         min-height: 178px;
         display: flex;
         flex-direction: column;
@@ -946,6 +1007,14 @@ st.markdown(
         box-sizing: border-box;
         overflow: hidden;
         width: 100%;
+        margin: 0;
+        transition: all 0.3s ease-in-out !important; 
+    }}
+    
+    .card:hover {{
+        transform: translateY(-8px) scale(1.02) !important;
+        box-shadow: 0px 15px 30px rgba(0,0,0,0.4) !important;
+        cursor: pointer !important;
     }}
 
     .gold {{
@@ -1021,10 +1090,12 @@ st.markdown(
             border-radius: 16px;
         }}
 
+        .card-grid-3, .card-grid-4 {{
+            grid-template-columns: 1fr;
+        }}
+
         .card {{
-            height: auto;
             min-height: 140px;
-            margin-bottom: 12px;
         }}
 
         .card h3 {{
@@ -1064,51 +1135,27 @@ te_departaments = "Departament" in df_ranking.columns and not df_departaments.em
 
 
 # --------------------------------------------------
-# TÍTOL
+# TÍTOL I LOGO EMPRESA
 # --------------------------------------------------
-st.markdown('<p class="title">🏆 PORRA MUNDIAL</p>', unsafe_allow_html=True)
-st.markdown(
-    '<p class="subtitle">Classificació en viu, moviment respecte l’última actualització, competició per departaments i resultats reals</p>',
-    unsafe_allow_html=True
-)
+col_titol, col_logo = st.columns([5, 1])
+
+with col_titol:
+    st.markdown('<p class="title">🏆 PORRA MUNDIAL</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p class="subtitle">Classificació en viu, moviment respecte l’última actualització, competició per departaments i resultats reals</p>',
+        unsafe_allow_html=True
+    )
+
+with col_logo:
+    if os.path.exists(LOGO_IMAGE):
+        st.image(LOGO_IMAGE, use_container_width=True)
 
 
 # --------------------------------------------------
 # INFO PRINCIPAL
 # --------------------------------------------------
-info1, info2, info3 = st.columns(3, gap="small")
-
-info1.markdown(
-    f"""
-    <div class='card darkcard'>
-        <h3>🕒 Dades actualitzades</h3>
-        <h1>{data_actualitzacio}</h1>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
-info2.markdown(
-    f"""
-    <div class='card greencard'>
-        <h3>🎁 Premi guanyador</h3>
-        <h1>{premi_guanyador} €</h1>
-        <p>{num_participants} participants x {PREU_PARTICIPACIO} €</p>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
-info3.markdown(
-    f"""
-    <div class='card bluecard'>
-        <h3>👥 Participants</h3>
-        <h1>{num_participants}</h1>
-        <p>porres registrades</p>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+html_info = f"<div class='card-grid-3'><div class='card darkcard'><h3>🕒 Dades actualitzades</h3><h1>{data_actualitzacio}</h1></div><div class='card greencard'><h3>🎁 Premi guanyador</h3><h1>{premi_guanyador} €</h1><p>{num_participants} participants x {PREU_PARTICIPACIO} €</p></div><div class='card bluecard'><h3>👥 Participants</h3><h1>{num_participants}</h1><p>porres registrades</p></div></div>"
+st.markdown(html_info, unsafe_allow_html=True)
 
 
 # --------------------------------------------------
@@ -1136,32 +1183,24 @@ st.subheader("🥇 TOP 3 General")
 
 top3 = df_ranking.head(3)
 
-c1, c2, c3 = st.columns(3, gap="small")
-
 top_cards = [
-    ("🥇", "gold", top3.iloc[0]),
-    ("🥈", "silver", top3.iloc[1]),
-    ("🥉", "bronze", top3.iloc[2]),
+    ("🥇", "gold", top3.iloc[0] if len(top3) > 0 else None),
+    ("🥈", "silver", top3.iloc[1] if len(top3) > 1 else None),
+    ("🥉", "bronze", top3.iloc[2] if len(top3) > 2 else None),
 ]
 
-for col, (medalla, classe, row) in zip([c1, c2, c3], top_cards):
-    subtext = "punts"
+html_top3 = "<div class='card-grid-3'>"
+for medalla, classe, row in top_cards:
+    if row is not None:
+        subtext = "punts"
+        if "Departament" in row.index:
+            subtext = f"{row['Departament']}"
+        evolucio = row["Evolució"] if "Evolució" in row.index else ""
 
-    if "Departament" in row.index:
-        subtext = f"{row['Departament']}"
+        html_top3 += f"<div class='card {classe}'><h3>{medalla} {row['Participant']}</h3><h1>{float(row['Punts']):.1f}</h1><p>{subtext} · {evolucio}</p></div>"
 
-    evolucio = row["Evolució"] if "Evolució" in row.index else ""
-
-    col.markdown(
-        f"""
-        <div class='card {classe}'>
-            <h3>{medalla} {row["Participant"]}</h3>
-            <h1>{float(row["Punts"]):.1f}</h1>
-            <p>{subtext} · {evolucio}</p>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+html_top3 += "</div>"
+st.markdown(html_top3, unsafe_allow_html=True)
 
 
 # --------------------------------------------------
@@ -1175,7 +1214,7 @@ mostrar_taula_ranking(df_ranking)
 # GRÀFIC GENERAL
 # --------------------------------------------------
 st.subheader("📈 Gràfic general de punts")
-mostrar_grafic_punts(df_ranking, color="#0b70c9", altura_minima=1000)
+mostrar_grafic_punts(df_ranking, color_scheme="blues", altura_minima=1000)
 
 
 # --------------------------------------------------
@@ -1228,21 +1267,46 @@ if jugador is not None:
 
         punts_categoria["Punts"] = punts_categoria["Punts"].fillna(0).round(1)
 
-        chart_cat = (
-            alt.Chart(punts_categoria)
-            .mark_bar(color="#1f77b4")
-            .encode(
-                x=alt.X("Categoria:N", sort=None, title=None),
-                y=alt.Y("Punts:Q", title="Punts"),
-                tooltip=[
-                    alt.Tooltip("Categoria:N", title="Categoria"),
-                    alt.Tooltip("Punts:Q", title="Punts", format=".1f")
-                ]
-            )
-            .properties(height=320)
+        # Gràfic vertical modern per la fitxa
+        bars_cat = alt.Chart(punts_categoria).mark_bar(
+            cornerRadiusEnd=6,
+            size=25
+        ).encode(
+            x=alt.X(
+                "Categoria:N", 
+                sort=None, 
+                title=None, 
+                axis=alt.Axis(labelAngle=-45, labelFontSize=12, tickSize=0, domain=False)
+            ),
+            y=alt.Y(
+                "Punts:Q", 
+                title="Punts", 
+                axis=alt.Axis(grid=True, gridColor="#f0f2f6", domain=False)
+            ),
+            color=alt.Color(
+                "Punts:Q", 
+                scale=alt.Scale(scheme="tealblues"), 
+                legend=None
+            ),
+            tooltip=[
+                alt.Tooltip("Categoria:N", title="Categoria"),
+                alt.Tooltip("Punts:Q", title="Punts", format=".1f")
+            ]
         )
 
-        c1.altair_chart(chart_cat, use_container_width=True)
+        text_cat = bars_cat.mark_text(
+            align='center',
+            baseline='bottom',
+            dy=-5,
+            fontSize=12,
+            fontWeight='bold',
+            color='#334e68'
+        ).encode(
+            text=alt.Text('Punts:Q', format='.1f')
+        )
+
+        chart_cat = (bars_cat + text_cat).properties(height=350).configure_view(strokeWidth=0)
+        c1.altair_chart(chart_cat, use_container_width=True, theme="streamlit")
 
         col_resultat_final_porra = trobar_col_resultat_final_porra(df_porra)
 
@@ -1257,7 +1321,23 @@ if jugador is not None:
         c2.write(f"⭐ MVP: {valor_o_pendent(df_j['MVP'].values[0])}")
         
         val_bota = valor_o_pendent(df_j['Pichichi'].values[0]) if 'Pichichi' in df_j.columns else "Pendent"
-        c2.write(f"⚽ Bota d'Or: {val_bota}")
+        
+        # BUSQUEM ELS GOLS REALS QUE TÉ AQUEST JUGADOR ARA MATEIX
+        gols_bota_str = ""
+        COL_PICHICHI = "Jugador Pichichi"
+        COL_GOLS = "Gols"
+        if val_bota != "Pendent" and COL_PICHICHI in df_resultats.columns and COL_GOLS in df_resultats.columns:
+            match = df_resultats[df_resultats[COL_PICHICHI].astype(str).str.strip().str.lower() == val_bota.strip().lower()]
+            if not match.empty:
+                g = match.iloc[0][COL_GOLS]
+                if pd.notna(g) and str(g).strip() != "":
+                    gols_bota_str = f" ({int(g)} gols reals)"
+                else:
+                    gols_bota_str = " (0 gols reals)"
+            else:
+                gols_bota_str = " (0 gols reals)"
+
+        c2.write(f"⚽ Bota d'Or: {val_bota}{gols_bota_str}")
 
         mostrar_prediccions_grups_participant(df_j)
         mostrar_prediccions_eliminatoria_participant(df_j)
@@ -1277,7 +1357,7 @@ if te_departaments:
     mostrar_taula_departaments(df_departaments)
 
     st.write("#### 📈 Gràfic departaments")
-    mostrar_grafic_departaments(df_departaments)
+    mostrar_grafic_departaments(df_departaments, color_scheme="purples")
 
     st.write("### 🎯 Classificació interna per departament")
 
@@ -1297,29 +1377,24 @@ if te_departaments:
         st.write(f"### 🥇 TOP 3 · {departament_sel}")
 
         dep_top = df_dep_individual.head(3)
-        dep_cols = st.columns(3, gap="small")
+        html_top_dep = "<div class='card-grid-3'>"
         medalles = ["🥇", "🥈", "🥉"]
         classes = ["gold", "silver", "bronze"]
 
         for i in range(min(3, len(dep_top))):
-            evolucio_dep = dep_top.iloc[i]["Evolució"] if "Evolució" in dep_top.columns else ""
+            row = dep_top.iloc[i]
+            evolucio_dep = row["Evolució"] if "Evolució" in row.index else ""
 
-            dep_cols[i].markdown(
-                f"""
-                <div class='card {classes[i]}'>
-                    <h3>{medalles[i]} {dep_top.iloc[i]["Participant"]}</h3>
-                    <h1>{float(dep_top.iloc[i]["Punts"]):.1f}</h1>
-                    <p>{departament_sel} · {evolucio_dep}</p>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
+            html_top_dep += f"<div class='card {classes[i]}'><h3>{medalles[i]} {row['Participant']}</h3><h1>{float(row['Punts']):.1f}</h1><p>{departament_sel} · {evolucio_dep}</p></div>"
+            
+        html_top_dep += "</div>"
+        st.markdown(html_top_dep, unsafe_allow_html=True)
 
         st.write(f"### 📊 Classificació interna · {departament_sel}")
         mostrar_taula_ranking(df_dep_individual)
 
         st.write(f"### 📈 Gràfic · {departament_sel}")
-        mostrar_grafic_punts(df_dep_individual, color="#6f42c1", altura_minima=350)
+        mostrar_grafic_punts(df_dep_individual, color_scheme="purples", altura_minima=350)
 
 else:
     st.info("Per activar aquest apartat, afegeix una columna 'Departament' al costat de 'Participants' al full Porra.")
@@ -1351,7 +1426,7 @@ if participants_filtrats:
     mostrar_taula_ranking(df_lligueta)
 
     st.write("#### 📈 Gràfic de la lligueta")
-    mostrar_grafic_punts(df_lligueta, color="#0f9d58", altura_minima=350)
+    mostrar_grafic_punts(df_lligueta, color_scheme="greens", altura_minima=350)
 
 else:
     st.write("Selecciona participants per crear una classificació reduïda tipus lligueta.")
@@ -1396,50 +1471,10 @@ pichichi_real, gols_pichichi = obtenir_pichichi_real(
 
 st.write("### 🏟️ Resum oficial")
 
-r1, r2, r3, r4 = st.columns(4, gap="small")
-
-r1.markdown(
-    f"""
-    <div class='card gold'>
-        <h3>🏆 Campió</h3>
-        <h1 style='font-size:28px'>{campio_real}</h1>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
-r2.markdown(
-    f"""
-    <div class='card silver'>
-        <h3>⭐ MVP</h3>
-        <h1 style='font-size:28px'>{mvp_real}</h1>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
 pichichi_subtext = f"{gols_pichichi} gols" if gols_pichichi != "Pendent" else "Pendent"
 
-r3.markdown(
-    f"""
-    <div class='card bronze'>
-        <h3>⚽ Bota d'Or</h3>
-        <h1 style='font-size:25px'>{pichichi_real}</h1>
-        <p>{pichichi_subtext}</p>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
-r4.markdown(
-    f"""
-    <div class='card bluecard'>
-        <h3>🏁 Resultat final</h3>
-        <h1 style='font-size:28px'>{resultat_final_real}</h1>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+html_resum = f"<div class='card-grid-4'><div class='card gold'><h3>🏆 Campió</h3><h1 style='font-size:28px'>{campio_real}</h1></div><div class='card silver'><h3>⭐ MVP</h3><h1 style='font-size:28px'>{mvp_real}</h1></div><div class='card bronze'><h3>⚽ Bota d'Or</h3><h1 style='font-size: clamp(16px, 2.5vw, 24px); white-space: normal; line-height: 1.2;'>{pichichi_real}</h1><p>{pichichi_subtext}</p></div><div class='card bluecard'><h3>🏁 Resultat final</h3><h1 style='font-size:28px'>{resultat_final_real}</h1></div></div>"
+st.markdown(html_resum, unsafe_allow_html=True)
 
 
 # --------------------------------------------------
@@ -1536,7 +1571,7 @@ else:
 
 
 # --------------------------------------------------
-# BOTA D'OR (TAULA LLISTAT)
+# BOTA D'OR (TAULA LLISTAT SENSE SCROLL)
 # --------------------------------------------------
 st.write("### ⚽ Bota d'Or")
 
@@ -1549,7 +1584,6 @@ if COL_PICHICHI in df_resultats_display.columns and COL_GOLS in df_resultats_dis
         errors="coerce"
     )
 
-    # Nova regla: No filtrem si els gols són < 1. S'ensenya tothom que tingui un nom valid.
     taula_pichichi = taula_pichichi[
         (taula_pichichi[COL_PICHICHI] != "") &
         (~taula_pichichi[COL_PICHICHI].str.lower().isin(["nan", "nat", "pendent"]))
@@ -1562,15 +1596,17 @@ if COL_PICHICHI in df_resultats_display.columns and COL_GOLS in df_resultats_dis
         })
     else:
         taula_pichichi = taula_pichichi.sort_values(COL_GOLS, ascending=False).reset_index(drop=True)
-        # Els jugadors sense número els hi posem un 0 perquè no quedin lletjos ("<NA>")
         taula_pichichi[COL_GOLS] = taula_pichichi[COL_GOLS].fillna(0).astype("Int64")
-        # Canviem el nom de la columna original només per visualitzar
         taula_pichichi = taula_pichichi.rename(columns={COL_PICHICHI: "Jugador"})
+
+    # Càlcul d'alçada dinàmica: 35px per fila + uns 40px extres de capçalera
+    altura_taula_pichichi = (len(taula_pichichi) * 35) + 40
 
     st.dataframe(
         taula_pichichi,
         use_container_width=True,
-        hide_index=True
+        hide_index=True,
+        height=altura_taula_pichichi # Fixa l'alçada per evitar l'scroll
     )
 else:
     taula_pichichi = pd.DataFrame({
