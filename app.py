@@ -35,16 +35,16 @@ if not os.path.exists(EXCEL_FILE):
 # --------------------------------------------------
 # BOTÓ RESET SNAPSHOT
 # --------------------------------------------------
-with st.sidebar:
-    if st.button("🔄 Reiniciar comparativa de moviments"):
-        for fitxer in [
-            SNAPSHOT_CURRENT_FILE,
-            SNAPSHOT_DISPLAY_FILE,
-            SNAPSHOT_META_FILE
-        ]:
-            if os.path.exists(fitxer):
-                os.remove(fitxer)
-        st.rerun()
+#with st.sidebar:
+ #   if st.button("🔄 Reiniciar comparativa de moviments"):
+  #      for fitxer in [
+   #         SNAPSHOT_CURRENT_FILE,
+    #        SNAPSHOT_DISPLAY_FILE,
+     #       SNAPSHOT_META_FILE
+      #  ]:
+       #     if os.path.exists(fitxer):
+        #        os.remove(fitxer)
+        #st.rerun()
 
 
 # --------------------------------------------------
