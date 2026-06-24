@@ -25,6 +25,23 @@ SNAPSHOT_CURRENT_FILE = "ranking_snapshot_current.csv"
 SNAPSHOT_DISPLAY_FILE = "ranking_snapshot_display.csv"
 SNAPSHOT_META_FILE = "ranking_snapshot_meta.json"
 
+# --------------------------------------------------
+# CONFIGURACIÓ DE PUNTS MÀXIMS
+# --------------------------------------------------
+MAX_PUNTS_CATEGORIA = {
+    "1rs grup": 24,
+    "2ns grup": 24,
+    "3rs grup": 18,
+    "Vuitens": 16,
+    "Quarts": 8,
+    "Semis": 4,
+    "Finalistes": 6, 
+    "Campió": 5,
+    "Resultat final": 5,
+    "MVP": 5,
+    "Bota d'Or": 10 # Valor orientatiu
+}
+
 # --- SISTEMA DE SEGURETAT ANTI-PANTALLA BLANCA ---
 if not os.path.exists(EXCEL_FILE):
     st.error(f"❌ No s'ha trobat l'arxiu de dades: **{EXCEL_FILE}**")
@@ -483,6 +500,7 @@ st.markdown(
     .block-container {{ padding-top: 2rem; padding-bottom: 2rem; background: rgba(255, 255, 255, 0.65); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 24px; margin-top: 24px; margin-bottom: 24px; box-shadow: 0px 8px 30px rgba(0,0,0,0.25); }}
     .title {{ font-size: clamp(32px, 5vw, 52px); font-weight: 900; margin-bottom: 0px; color: #102a43; letter-spacing: -1px; }}
     .subtitle {{ font-size: clamp(14px, 2vw, 18px); color: #334e68; margin-top: 0px; margin-bottom: 25px; }}
+    .card-grid-2 {{ display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.5rem; align-items: stretch; margin-bottom: 1rem; }}
     .card-grid-3 {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; align-items: stretch; margin-bottom: 1rem; }}
     .card-grid-4 {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.5rem; align-items: stretch; margin-bottom: 1rem; }}
     .card {{ padding: 18px; border-radius: 18px; text-align: center; box-shadow: 0px 4px 20px rgba(0,0,0,0.18); height: 100% !important; min-height: 178px; display: flex; flex-direction: column; justify-content: center; align-items: center; box-sizing: border-box; overflow: hidden; width: 100%; transition: all 0.3s ease-in-out !important; }}
@@ -492,12 +510,13 @@ st.markdown(
     .bronze {{ background: linear-gradient(135deg, #cd7f32, #f0b27a); color: white; }}
     .bluecard {{ background: linear-gradient(135deg, #0b70c9, #7cc5ff); color: white; }}
     .greencard {{ background: linear-gradient(135deg, #0f9d58, #8ee6b3); color: white; }}
+    .redcard {{ background: linear-gradient(135deg, #dc3545, #f1aeb5); color: white; }}
     .darkcard {{ background: linear-gradient(135deg, #102a43, #486581); color: white; }}
     .purplecard {{ background: linear-gradient(135deg, #6f42c1, #b982ff); color: white; margin-top: 18px; margin-bottom: 18px; }}
     .card h3 {{ margin: 0px 0px 14px 0px; font-size: clamp(15px, 2vw, 24px); line-height: 1.15; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
     .card h1 {{ margin: 0px; font-size: clamp(24px, 4vw, 40px); line-height: 1.1; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
     .card p {{ margin: 12px 0px 0px 0px; font-size: clamp(11px, 1.5vw, 15px); max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-    @media (max-width: 768px) {{ .block-container {{ padding-left: 0.8rem; padding-right: 0.8rem; border-radius: 16px; }} .card-grid-3, .card-grid-4 {{ grid-template-columns: 1fr; }} .card {{ min-height: 140px; }} .card h3, .card h1, .card p {{ white-space: normal; }} }}
+    @media (max-width: 768px) {{ .block-container {{ padding-left: 0.8rem; padding-right: 0.8rem; border-radius: 16px; }} .card-grid-2, .card-grid-3, .card-grid-4 {{ grid-template-columns: 1fr; }} .card {{ min-height: 140px; }} .card h3, .card h1, .card p {{ white-space: normal; }} }}
     </style>
     """, unsafe_allow_html=True
 )
@@ -528,6 +547,37 @@ with col_logo:
 # INFO PRINCIPAL
 # --------------------------------------------------
 st.markdown(f"<div class='card-grid-3'><div class='card darkcard'><h3>🕒 Dades actualitzades</h3><h1>{data_actualitzacio}</h1></div><div class='card greencard'><h3>🎁 Premi guanyador</h3><h1>{premi_guanyador} €</h1><p>{num_participants} participants x {PREU_PARTICIPACIO} €</p></div><div class='card bluecard'><h3>👥 Participants</h3><h1>{num_participants}</h1><p>porres registrades</p></div></div>", unsafe_allow_html=True)
+
+
+# --------------------------------------------------
+# MOVIMENTS DESTACATS (PUJADES I BAIXADES)
+# --------------------------------------------------
+if "Canvi posició" in df_ranking.columns:
+    max_p = df_ranking["Canvi posició"].max()
+    min_p = df_ranking["Canvi posició"].min()
+    
+    # Només mostrem la secció si hi ha hagut algun moviment real
+    if pd.notna(max_p) and pd.notna(min_p) and (max_p > 0 or min_p < 0):
+        st.write("### 🎢 La muntanya russa de posicions")
+        html_mov = "<div class='card-grid-2'>"
+        
+        if max_p > 0:
+            pujadors = df_ranking[df_ranking["Canvi posició"] == max_p]["Participant"].tolist()
+            noms_p = " · ".join(pujadors[:2]) + ("..." if len(pujadors) > 2 else "")
+            html_mov += f"<div class='card greencard'><h3>🚀 La gran remuntada</h3><h1>{noms_p}</h1><p>+{int(max_p)} posicions d'una tacada! 🔥</p></div>"
+        else:
+            html_mov += "<div class='card greencard'><h3>🚀 La gran remuntada</h3><h1>-</h1><p>Ningú ha guanyat posicions encara 🤷‍♂️</p></div>"
+            
+        if min_p < 0:
+            baixadors = df_ranking[df_ranking["Canvi posició"] == min_p]["Participant"].tolist()
+            noms_b = " · ".join(baixadors[:2]) + ("..." if len(baixadors) > 2 else "")
+            html_mov += f"<div class='card redcard'><h3>📉 Caiguda lliure</h3><h1>{noms_b}</h1><p>{int(min_p)} posicions avall... 🥶🚑</p></div>"
+        else:
+            html_mov += "<div class='card redcard'><h3>📉 Caiguda lliure</h3><h1>-</h1><p>Tothom manté el tipus 🧘‍♂️</p></div>"
+            
+        html_mov += "</div>"
+        st.markdown(html_mov, unsafe_allow_html=True)
+
 
 # --------------------------------------------------
 # DEPARTAMENT LÍDER
