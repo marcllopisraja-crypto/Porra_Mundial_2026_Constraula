@@ -21,28 +21,9 @@ BACKGROUND_IMAGE = "fifa-Trionda.jpg"
 LOGO_IMAGE = "Logo RGB fondo transparente letra negra Constraula.png"
 PREU_PARTICIPACIO = 5
 
-# Nous arxius pel sistema de memòria diària
-SNAPSHOT_BASELINE_FILE = "ranking_snapshot_baseline.csv" # La foto de com estàvem ahir
-SNAPSHOT_LATEST_FILE = "ranking_snapshot_latest.csv"     # L'última pujada (per si passem de dia)
+SNAPSHOT_CURRENT_FILE = "ranking_snapshot_current.csv"
 SNAPSHOT_DISPLAY_FILE = "ranking_snapshot_display.csv"
 SNAPSHOT_META_FILE = "ranking_snapshot_meta.json"
-
-# --------------------------------------------------
-# CONFIGURACIÓ DE PUNTS MÀXIMS
-# --------------------------------------------------
-MAX_PUNTS_CATEGORIA = {
-    "1rs grup": 24,
-    "2ns grup": 24,
-    "3rs grup": 18,
-    "Vuitens": 16,
-    "Quarts": 8,
-    "Semis": 4,
-    "Finalistes": 6, 
-    "Campió": 5,
-    "Resultat final": 5,
-    "MVP": 5,
-    "Bota d'Or": 10 # Valor orientatiu
-}
 
 # --- SISTEMA DE SEGURETAT ANTI-PANTALLA BLANCA ---
 if not os.path.exists(EXCEL_FILE):
@@ -224,7 +205,7 @@ def crear_ranking_departaments(df_ranking):
     return resum[["Posició", "Departament", "Participants", "Mitjana_punts", "Punts_totals", "Millor_puntuacio", "Líder departament", "Dif líder"]]
 
 # --------------------------------------------------
-# SNAPSHOT / MOVIMENT AUTOMÀTIC (LÒGICA DIÀRIA)
+# SNAPSHOT / MOVIMENT AUTOMÀTIC
 # --------------------------------------------------
 def carregar_meta_snapshot():
     if not os.path.exists(SNAPSHOT_META_FILE): return {}
@@ -232,12 +213,8 @@ def carregar_meta_snapshot():
         with open(SNAPSHOT_META_FILE, "r", encoding="utf-8") as f: return json.load(f)
     except: return {}
 
-def guardar_meta_snapshot(excel_mtime, baseline_date):
-    meta = {
-        "excel_mtime": float(excel_mtime), 
-        "baseline_date": baseline_date, 
-        "updated_at": datetime.now(tz=ZoneInfo("Europe/Madrid")).isoformat()
-    }
+def guardar_meta_snapshot(excel_mtime):
+    meta = {"excel_mtime": float(excel_mtime), "updated_at": datetime.now(tz=ZoneInfo("Europe/Madrid")).isoformat()}
     with open(SNAPSHOT_META_FILE, "w", encoding="utf-8") as f: json.dump(meta, f, ensure_ascii=False, indent=2)
 
 def carregar_csv_segura(path):
@@ -245,14 +222,16 @@ def carregar_csv_segura(path):
     try: return pd.read_csv(path)
     except: return pd.DataFrame()
 
+def guardar_snapshot_actual(df_ranking):
+    df_snapshot = df_ranking[["Participant", "Punts", "Posició"]].copy().rename(columns={"Punts": "Punts anteriors", "Posició": "Posició anterior"})
+    df_snapshot.to_csv(SNAPSHOT_CURRENT_FILE, index=False)
+
 def guardar_snapshot_display(df_ranking):
     cols = ["Participant", "Evolució", "Canvi punts", "Canvi posició", "Punts anteriors", "Posició anterior"]
     df_ranking[[c for c in cols if c in df_ranking.columns]].copy().to_csv(SNAPSHOT_DISPLAY_FILE, index=False)
 
 def aplicar_moviment(df_ranking, excel_mtime):
     df_actual = df_ranking.copy()
-    avui_str = datetime.now(tz=ZoneInfo("Europe/Madrid")).strftime("%Y-%m-%d")
-
     def posar_neutral(df):
         df = df.copy()
         df["Posició anterior"] = df["Posició"]
@@ -261,12 +240,9 @@ def aplicar_moviment(df_ranking, excel_mtime):
         df["Canvi posició"] = 0
         df["Evolució"] = "⚪ —"
         return df
-
     meta = carregar_meta_snapshot()
     meta_mtime = meta.get("excel_mtime", None)
-    baseline_date = meta.get("baseline_date", "")
 
-    # 1. Si no hi ha hagut canvis a l'Excel avui, mostrem el que ja tenim processat
     if meta_mtime is not None and float(meta_mtime) == float(excel_mtime):
         df_mov = carregar_csv_segura(SNAPSHOT_DISPLAY_FILE)
         if not df_mov.empty and "Participant" in df_mov.columns:
@@ -278,50 +254,32 @@ def aplicar_moviment(df_ranking, excel_mtime):
                 df_actual["Evolució"] = df_actual["Evolució"].fillna("⚪ —")
                 df_actual["Canvi punts"] = pd.to_numeric(df_actual["Canvi punts"], errors="coerce").fillna(0.0).round(1)
                 if "Canvi posició" not in df_actual.columns: df_actual["Canvi posició"] = 0
+            guardar_snapshot_actual(df_actual)
+            guardar_snapshot_display(df_actual)
+            guardar_meta_snapshot(excel_mtime)
             return df_actual
         return posar_neutral(df_actual)
 
-    # 2. Si l'Excel HA CANVIAT: Comprovem si és un dia nou
-    if baseline_date != avui_str:
-        # És un nou dia! El rànquing final d'ahir (LATEST) passa a ser la nova referència inicial (BASELINE)
-        df_latest = carregar_csv_segura(SNAPSHOT_LATEST_FILE)
-        if not df_latest.empty:
-            df_latest.to_csv(SNAPSHOT_BASELINE_FILE, index=False)
-        baseline_date = avui_str
-
-    # 3. Carreguem la foto de com estàvem a principis d'aquest dia
-    df_prev = carregar_csv_segura(SNAPSHOT_BASELINE_FILE)
-    
-    # Si és el primeríssim cop que arranquem l'app
+    df_prev = carregar_csv_segura(SNAPSHOT_CURRENT_FILE)
     if df_prev.empty or "Participant" not in df_prev.columns:
         df_actual = posar_neutral(df_actual)
-        cols_state = ["Participant", "Punts", "Posició"]
-        df_actual[cols_state].to_csv(SNAPSHOT_LATEST_FILE, index=False)
-        df_actual[cols_state].to_csv(SNAPSHOT_BASELINE_FILE, index=False)
+        guardar_snapshot_actual(df_actual)
         guardar_snapshot_display(df_actual)
-        guardar_meta_snapshot(excel_mtime, baseline_date)
+        guardar_meta_snapshot(excel_mtime)
         return df_actual
 
-    # 4. Fem la comparativa respecte al BASELINE (final d'ahir)
     df_prev["Participant"] = df_prev["Participant"].astype(str).str.strip()
-    df_prev = df_prev[["Participant", "Punts", "Posició"]].rename(columns={"Punts": "Punts anteriors", "Posició": "Posició anterior"})
     df_actual = df_actual.merge(df_prev, on="Participant", how="left")
-    
     df_actual["Canvi punts"] = (df_actual["Punts"] - pd.to_numeric(df_actual["Punts anteriors"], errors="coerce")).round(1)
     df_actual["Canvi posició"] = (pd.to_numeric(df_actual["Posició anterior"], errors="coerce") - df_actual["Posició"]).fillna(0)
 
-    # Cas de seguretat: si pugen el mateix Excel sense adonar-se'n
     if df_actual["Canvi punts"].fillna(0).eq(0).all() and df_actual["Canvi posició"].fillna(0).eq(0).all() and len(df_actual) == len(df_prev):
         df_old_display = carregar_csv_segura(SNAPSHOT_DISPLAY_FILE)
         if not df_old_display.empty and "Participant" in df_old_display.columns:
-            df_actual = df_actual.drop(columns=["Canvi punts", "Canvi posició", "Punts anteriors", "Posició anterior"], errors="ignore").merge(df_old_display[["Participant", "Evolució", "Canvi punts", "Canvi posició"]], on="Participant", how="left")
+            df_actual = df_actual.drop(columns=["Canvi punts", "Canvi posició"], errors="ignore").merge(df_old_display[["Participant", "Evolució", "Canvi punts", "Canvi posició"]], on="Participant", how="left")
             df_actual["Evolució"] = df_actual["Evolució"].fillna("⚪ —")
             df_actual["Canvi punts"] = pd.to_numeric(df_actual["Canvi punts"], errors="coerce").fillna(0.0).round(1)
-            
-            # Guardem igualment el LATEST
-            cols_state = ["Participant", "Punts", "Posició"]
-            df_actual[cols_state].to_csv(SNAPSHOT_LATEST_FILE, index=False)
-            guardar_meta_snapshot(excel_mtime, baseline_date)
+            guardar_meta_snapshot(excel_mtime)
             return df_actual
 
     df_actual["Canvi punts"] = pd.to_numeric(df_actual["Canvi punts"], errors="coerce").fillna(0.0).round(1)
@@ -332,13 +290,9 @@ def aplicar_moviment(df_ranking, excel_mtime):
         elif canvi < 0: return f"🔴 ▼ {canvi}"
         else: return "⚪ —"
     df_actual["Evolució"] = df_actual.apply(evolucio_unificada, axis=1)
-    
-    # 5. Guardem la nova foto LATEST per estar preparats per demà i referquem pantalla
-    cols_state = ["Participant", "Punts", "Posició"]
-    df_actual[cols_state].to_csv(SNAPSHOT_LATEST_FILE, index=False)
+    guardar_snapshot_actual(df_actual)
     guardar_snapshot_display(df_actual)
-    guardar_meta_snapshot(excel_mtime, baseline_date)
-    
+    guardar_meta_snapshot(excel_mtime)
     return df_actual
 
 
@@ -529,7 +483,6 @@ st.markdown(
     .block-container {{ padding-top: 2rem; padding-bottom: 2rem; background: rgba(255, 255, 255, 0.65); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 24px; margin-top: 24px; margin-bottom: 24px; box-shadow: 0px 8px 30px rgba(0,0,0,0.25); }}
     .title {{ font-size: clamp(32px, 5vw, 52px); font-weight: 900; margin-bottom: 0px; color: #102a43; letter-spacing: -1px; }}
     .subtitle {{ font-size: clamp(14px, 2vw, 18px); color: #334e68; margin-top: 0px; margin-bottom: 25px; }}
-    .card-grid-2 {{ display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.5rem; align-items: stretch; margin-bottom: 1rem; }}
     .card-grid-3 {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; align-items: stretch; margin-bottom: 1rem; }}
     .card-grid-4 {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.5rem; align-items: stretch; margin-bottom: 1rem; }}
     .card {{ padding: 18px; border-radius: 18px; text-align: center; box-shadow: 0px 4px 20px rgba(0,0,0,0.18); height: 100% !important; min-height: 178px; display: flex; flex-direction: column; justify-content: center; align-items: center; box-sizing: border-box; overflow: hidden; width: 100%; transition: all 0.3s ease-in-out !important; }}
@@ -539,13 +492,12 @@ st.markdown(
     .bronze {{ background: linear-gradient(135deg, #cd7f32, #f0b27a); color: white; }}
     .bluecard {{ background: linear-gradient(135deg, #0b70c9, #7cc5ff); color: white; }}
     .greencard {{ background: linear-gradient(135deg, #0f9d58, #8ee6b3); color: white; }}
-    .redcard {{ background: linear-gradient(135deg, #dc3545, #f1aeb5); color: white; }}
     .darkcard {{ background: linear-gradient(135deg, #102a43, #486581); color: white; }}
     .purplecard {{ background: linear-gradient(135deg, #6f42c1, #b982ff); color: white; margin-top: 18px; margin-bottom: 18px; }}
     .card h3 {{ margin: 0px 0px 14px 0px; font-size: clamp(15px, 2vw, 24px); line-height: 1.15; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
     .card h1 {{ margin: 0px; font-size: clamp(24px, 4vw, 40px); line-height: 1.1; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
     .card p {{ margin: 12px 0px 0px 0px; font-size: clamp(11px, 1.5vw, 15px); max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-    @media (max-width: 768px) {{ .block-container {{ padding-left: 0.8rem; padding-right: 0.8rem; border-radius: 16px; }} .card-grid-2, .card-grid-3, .card-grid-4 {{ grid-template-columns: 1fr; }} .card {{ min-height: 140px; }} .card h3, .card h1, .card p {{ white-space: normal; }} }}
+    @media (max-width: 768px) {{ .block-container {{ padding-left: 0.8rem; padding-right: 0.8rem; border-radius: 16px; }} .card-grid-3, .card-grid-4 {{ grid-template-columns: 1fr; }} .card {{ min-height: 140px; }} .card h3, .card h1, .card p {{ white-space: normal; }} }}
     </style>
     """, unsafe_allow_html=True
 )
@@ -576,37 +528,6 @@ with col_logo:
 # INFO PRINCIPAL
 # --------------------------------------------------
 st.markdown(f"<div class='card-grid-3'><div class='card darkcard'><h3>🕒 Dades actualitzades</h3><h1>{data_actualitzacio}</h1></div><div class='card greencard'><h3>🎁 Premi guanyador</h3><h1>{premi_guanyador} €</h1><p>{num_participants} participants x {PREU_PARTICIPACIO} €</p></div><div class='card bluecard'><h3>👥 Participants</h3><h1>{num_participants}</h1><p>porres registrades</p></div></div>", unsafe_allow_html=True)
-
-
-# --------------------------------------------------
-# MOVIMENTS DESTACATS (PUJADES I BAIXADES)
-# --------------------------------------------------
-if "Canvi posició" in df_ranking.columns:
-    max_p = df_ranking["Canvi posició"].max()
-    min_p = df_ranking["Canvi posició"].min()
-    
-    # Només mostrem la secció si hi ha hagut algun moviment real
-    if pd.notna(max_p) and pd.notna(min_p) and (max_p > 0 or min_p < 0):
-        st.write("### 🎢 La muntanya russa de posicions")
-        html_mov = "<div class='card-grid-2'>"
-        
-        if max_p > 0:
-            pujadors = df_ranking[df_ranking["Canvi posició"] == max_p]["Participant"].tolist()
-            noms_p = " · ".join(pujadors[:2]) + ("..." if len(pujadors) > 2 else "")
-            html_mov += f"<div class='card greencard'><h3>🚀 La gran remuntada</h3><h1>{noms_p}</h1><p>+{int(max_p)} posicions d'una tacada! 🔥</p></div>"
-        else:
-            html_mov += "<div class='card greencard'><h3>🚀 La gran remuntada</h3><h1>-</h1><p>Ningú ha guanyat posicions avui 🤷‍♂️</p></div>"
-            
-        if min_p < 0:
-            baixadors = df_ranking[df_ranking["Canvi posició"] == min_p]["Participant"].tolist()
-            noms_b = " · ".join(baixadors[:2]) + ("..." if len(baixadors) > 2 else "")
-            html_mov += f"<div class='card redcard'><h3>📉 Caiguda lliure</h3><h1>{noms_b}</h1><p>{int(min_p)} posicions avall... 🥶🚑</p></div>"
-        else:
-            html_mov += "<div class='card redcard'><h3>📉 Caiguda lliure</h3><h1>-</h1><p>Tothom manté el tipus 🧘‍♂️</p></div>"
-            
-        html_mov += "</div>"
-        st.markdown(html_mov, unsafe_allow_html=True)
-
 
 # --------------------------------------------------
 # DEPARTAMENT LÍDER
