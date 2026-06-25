@@ -76,7 +76,7 @@ FLAGS = {
 # --------------------------------------------------
 @st.cache_data(show_spinner=False)
 def carregar_dades(excel_file, file_mtime):
-    # Intentem carregar les 3 pestanyes
+    # Lògica protegida per llegir la pestanya Calendari sense donar errors si no existeix
     try:
         sheets = pd.read_excel(
             excel_file,
@@ -87,7 +87,6 @@ def carregar_dades(excel_file, file_mtime):
         df_resultats = sheets["Resultats Reals"]
         df_calendari = sheets["Calendari"]
     except ValueError:
-        # Si la pestanya Calendari encara no existeix, carreguem les normals per evitar errors
         sheets = pd.read_excel(
             excel_file,
             sheet_name=["Porra", "Resultats Reals"],
@@ -543,7 +542,10 @@ st.markdown(
 # --------------------------------------------------
 excel_mtime = os.path.getmtime(EXCEL_FILE) if os.path.exists(EXCEL_FILE) else 0
 data_actualitzacio = obtenir_data_actualitzacio_fitxer(EXCEL_FILE)
+
+# LLegim també df_calendari de la funció carregar_dades actualitzada
 df_porra, df_resultats, df_calendari = carregar_dades(EXCEL_FILE, excel_mtime)
+
 df_ranking = aplicar_moviment(crear_ranking_des_de_porra(df_porra), excel_mtime)
 df_departaments = crear_ranking_departaments(df_ranking)
 num_participants = len(df_ranking)
@@ -753,7 +755,7 @@ else:
 # --------------------------------------------------
 # RESULTATS REALS
 # --------------------------------------------------
-st.subheader("✅ Resultats reals (Resum globals)")
+st.subheader("✅ Resultats reals")
 df_resultats_display = preparar_taula_buida(df_resultats)
 
 campio_real = afegir_bandera(primer_valor_o_pendent(df_resultats_display, "Campió"))
