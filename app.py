@@ -76,16 +76,33 @@ FLAGS = {
 # --------------------------------------------------
 @st.cache_data(show_spinner=False)
 def carregar_dades(excel_file, file_mtime):
-    sheets = pd.read_excel(
-        excel_file,
-        sheet_name=["Porra", "Resultats Reals"],
-        engine="openpyxl"
-    )
-    df_porra = sheets["Porra"]
-    df_resultats = sheets["Resultats Reals"]
+    # Intentem carregar les 3 pestanyes
+    try:
+        sheets = pd.read_excel(
+            excel_file,
+            sheet_name=["Porra", "Resultats Reals", "Calendari"],
+            engine="openpyxl"
+        )
+        df_porra = sheets["Porra"]
+        df_resultats = sheets["Resultats Reals"]
+        df_calendari = sheets["Calendari"]
+    except ValueError:
+        # Si la pestanya Calendari encara no existeix, carreguem les normals per evitar errors
+        sheets = pd.read_excel(
+            excel_file,
+            sheet_name=["Porra", "Resultats Reals"],
+            engine="openpyxl"
+        )
+        df_porra = sheets["Porra"]
+        df_resultats = sheets["Resultats Reals"]
+        df_calendari = pd.DataFrame(columns=["Fase", "Partit", "Data", "Hora", "Grup", "Resultat"])
+
     df_porra.columns = df_porra.columns.astype(str).str.strip()
     df_resultats.columns = df_resultats.columns.astype(str).str.strip()
-    return df_porra, df_resultats
+    if not df_calendari.empty:
+        df_calendari.columns = df_calendari.columns.astype(str).str.strip()
+
+    return df_porra, df_resultats, df_calendari
 
 
 @st.cache_data(show_spinner=False)
@@ -526,7 +543,7 @@ st.markdown(
 # --------------------------------------------------
 excel_mtime = os.path.getmtime(EXCEL_FILE) if os.path.exists(EXCEL_FILE) else 0
 data_actualitzacio = obtenir_data_actualitzacio_fitxer(EXCEL_FILE)
-df_porra, df_resultats = carregar_dades(EXCEL_FILE, excel_mtime)
+df_porra, df_resultats, df_calendari = carregar_dades(EXCEL_FILE, excel_mtime)
 df_ranking = aplicar_moviment(crear_ranking_des_de_porra(df_porra), excel_mtime)
 df_departaments = crear_ranking_departaments(df_ranking)
 num_participants = len(df_ranking)
@@ -702,10 +719,41 @@ if participants_filtrats:
 else:
     st.write("Selecciona participants per crear una classificació reduïda tipus lligueta.")
 
+
+# --------------------------------------------------
+# CALENDARI I RESULTATS DELS PARTITS
+# --------------------------------------------------
+st.subheader("📅 Calendari i Resultats dels Partits")
+
+if not df_calendari.empty:
+    # Netejar la columna de resultats per fer el filtrat
+    df_calendari["Resultat_Net"] = df_calendari["Resultat"].astype(str).str.strip().str.lower()
+    
+    # Separem els que tenen resultat marcat i els que posa "Pendent" o estan buits
+    df_finalitzats = df_calendari[~df_calendari["Resultat_Net"].isin(["pendent", "nan", ""])]
+    df_pendents = df_calendari[df_calendari["Resultat_Net"].isin(["pendent", "nan", ""])]
+    
+    tab_recents, tab_proxims = st.tabs(["✅ Resultats Registrats", "🔜 Pròxims Partits"])
+    
+    with tab_recents:
+        if not df_finalitzats.empty:
+            st.dataframe(df_finalitzats[["Fase", "Grup", "Partit", "Data", "Resultat"]], use_container_width=True, hide_index=True)
+        else:
+            st.info("Encara no hi ha resultats registrats.")
+            
+    with tab_proxims:
+        if not df_pendents.empty:
+            st.dataframe(df_pendents[["Fase", "Grup", "Partit", "Data", "Hora"]], use_container_width=True, hide_index=True)
+        else:
+            st.info("No hi ha partits pendents.")
+else:
+    st.info("Afegeix una pestanya 'Calendari' al teu Excel per veure els propers partits i resultats.")
+
+
 # --------------------------------------------------
 # RESULTATS REALS
 # --------------------------------------------------
-st.subheader("✅ Resultats reals")
+st.subheader("✅ Resultats reals (Resum globals)")
 df_resultats_display = preparar_taula_buida(df_resultats)
 
 campio_real = afegir_bandera(primer_valor_o_pendent(df_resultats_display, "Campió"))
