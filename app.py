@@ -728,6 +728,10 @@ else:
 st.subheader("📅 Calendari i Resultats dels Partits")
 
 if not df_calendari.empty:
+    # --- AFEGEIX AQUESTES DUES LÍNIES PER ARREGLAR LA DATA ---
+    if "Data" in df_calendari.columns:
+        df_calendari["Data"] = pd.to_datetime(df_calendari["Data"], errors="coerce").dt.strftime("%d/%m/%Y").fillna("")
+    # ---------------------------------------------------------
     # Netejar la columna de resultats per fer el filtrat
     df_calendari["Resultat_Net"] = df_calendari["Resultat"].astype(str).str.strip().str.lower()
     
