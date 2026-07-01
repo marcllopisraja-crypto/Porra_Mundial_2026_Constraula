@@ -5,6 +5,7 @@ import base64
 import os
 import json
 import unicodedata
+import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -76,7 +77,6 @@ FLAGS = {
 # --------------------------------------------------
 @st.cache_data(show_spinner=False)
 def carregar_dades(excel_file, file_mtime):
-    # Lògica protegida per llegir la pestanya Calendari sense donar errors si no existeix
     try:
         sheets = pd.read_excel(
             excel_file,
@@ -408,18 +408,41 @@ def obtenir_pichichi_real(df_resultats_display, col_pichichi, col_gols):
     jugadors_top = taula[taula[col_gols] == taula[col_gols].max()][col_pichichi].tolist()
     return " · ".join(jugadors_top), str(int(taula[col_gols].max()))
 
-def obtenir_prediccions_fase(df_j, prefix, quantitat):
+def obtenir_prediccions_fase(df_j, prefix, quantitat, team_max_phase, dead_teams, vuitens_complet, fase_idx):
     files = []
     for i in range(1, quantitat + 1):
-        col = f"{prefix}_{i}"
+        if prefix == "Campió": col = "Campió"
+        else: col = f"{prefix}_{i}"
+        
         valor = valor_o_pendent(df_j[col].values[0]) if col in df_j.columns else "Pendent"
-        files.append({"Posició": i, "Equip": afegir_bandera(valor)})
+        txt_base = afegir_bandera(valor)
+        equip_norm = normalitzar_text(valor)
+        
+        if equip_norm in ["pendent", "nan", "nat", ""]:
+            estat = "⚪ "
+        else:
+            max_phase_reached = team_max_phase.get(equip_norm, 0)
+            
+            if max_phase_reached >= fase_idx:
+                estat = "🟢 "
+            elif equip_norm in dead_teams:
+                estat = "🔴 "
+            elif vuitens_complet and max_phase_reached == 0:
+                estat = "🔴 "
+            else:
+                estat = "⚪ "
+        
+        if prefix == "Campió":
+            files.append({"Concepte": "Campió previst", "Equip": f"{estat}{txt_base}"})
+        elif prefix == "Final":
+            files.append({"Finalista": f"Finalista {i}", "Equip": f"{estat}{txt_base}"})
+        else:
+            files.append({"Posició": i, "Equip": f"{estat}{txt_base}"})
     return pd.DataFrame(files)
 
 def mostrar_prediccions_grups_participant(df_j, df_resultats):
     st.write("### 🧩 Prediccions fase de grups")
     
-    # LLEGENDA
     st.markdown("""
     <div style="background-color: rgba(255, 255, 255, 0.7); padding: 12px 18px; border-radius: 12px; margin-bottom: 16px; border: 1px solid rgba(0,0,0,0.1); font-size: 14px;">
         <p style="margin-bottom: 8px;"><strong>Llegenda de resultats:</strong></p>
@@ -433,7 +456,6 @@ def mostrar_prediccions_grups_participant(df_j, df_resultats):
     </div>
     """, unsafe_allow_html=True)
     
-    # Extraiem resultats
     grups_reals = {}
     if all(c in df_resultats.columns for c in ["Grup", "Posició", "Equip"]):
         for _, row in df_resultats.iterrows():
@@ -489,18 +511,83 @@ def mostrar_prediccions_grups_participant(df_j, df_resultats):
     else:
         st.info("No s'han detectat dades de la fase de grups.")
 
-def mostrar_prediccions_eliminatoria_participant(df_j):
+def mostrar_prediccions_eliminatoria_participant(df_j, df_resultats, df_calendari):
     st.write("### 🧭 Prediccions fase eliminatòria")
+    
+    st.markdown("""
+    <div style="background-color: rgba(255, 255, 255, 0.7); padding: 12px 18px; border-radius: 12px; margin-bottom: 16px; border: 1px solid rgba(0,0,0,0.1); font-size: 14px;">
+        <p style="margin-bottom: 8px;"><strong>Llegenda de resultats:</strong></p>
+        <ul style="margin: 0; padding-left: 20px;">
+            <li>🟢 <strong>Verd:</strong> L'equip ha arribat oficialment a aquesta fase (encertat).</li>
+            <li>🔴 <strong>Vermell:</strong> L'equip ha estat eliminat abans o en aquesta mateixa ronda (fallat).</li>
+            <li>⚪ <strong>Pendent:</strong> Encara no ha arribat, però l'equip segueix viu al torneig.</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    team_max_phase = {}
+    for col, idx in [("Vuitens", 1), ("Quarts", 2), ("Semis", 3), ("Finalistes", 4), ("Campió", 5)]:
+        if col in df_resultats.columns:
+            for val in llista_valors_no_buits(df_resultats, col):
+                t = normalitzar_text(val)
+                if t != "pendent":
+                    team_max_phase[t] = max(team_max_phase.get(t, 0), idx)
+    
+    dead_teams = set()
+    if not df_calendari.empty:
+        for _, row in df_calendari.iterrows():
+            res = str(row.get("Resultat", "")).strip().lower()
+            if res not in ["pendent", "nan", ""]:
+                fase_nom = str(row.get("Fase", "")).strip().lower()
+                partit = str(row.get("Partit", ""))
+                
+                target_idx = 0
+                if "setzen" in fase_nom or "1/16" in fase_nom or "dieciseis" in fase_nom: target_idx = 1
+                elif "vuit" in fase_nom or "octav" in fase_nom or "1/8" in fase_nom: target_idx = 2
+                elif "quart" in fase_nom or "cuart" in fase_nom or "1/4" in fase_nom: target_idx = 3
+                elif "semi" in fase_nom or "1/2" in fase_nom: target_idx = 4
+                elif "final" in fase_nom and "consol" not in fase_nom and "3r" not in fase_nom: target_idx = 5
+                
+                if target_idx > 0:
+                    parts = [t.strip() for t in re.split(r' vs\. | vs | - ', partit, maxsplit=1)]
+                    if len(parts) == 2:
+                        t1, t2 = normalitzar_text(parts[0]), normalitzar_text(parts[1])
+                        
+                        matches = re.findall(r'\d+', res)
+                        winner = None
+                        loser = None
+                        
+                        if len(matches) >= 2:
+                            g1, g2 = int(matches[0]), int(matches[1])
+                            if g1 > g2: 
+                                winner, loser = t1, t2
+                            elif g2 > g1: 
+                                winner, loser = t2, t1
+                            elif len(matches) >= 4:
+                                p1, p2 = int(matches[2]), int(matches[3])
+                                if p1 > p2: 
+                                    winner, loser = t1, t2
+                                elif p2 > p1: 
+                                    winner, loser = t2, t1
+                                    
+                        if winner:
+                            team_max_phase[winner] = max(team_max_phase.get(winner, 0), target_idx)
+                        if loser:
+                            dead_teams.add(loser)
+                            team_max_phase[loser] = max(team_max_phase.get(loser, 0), target_idx - 1)
+    
+    vuitens_complet = False
+    if "Vuitens" in df_resultats.columns:
+        v_teams = [t for t in llista_valors_no_buits(df_resultats, "Vuitens") if normalitzar_text(t) != "pendent"]
+        if len(v_teams) >= 16:
+            vuitens_complet = True
+            
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["Vuitens", "Quarts", "Semis", "Final", "Campió"])
-    with tab1: st.dataframe(obtenir_prediccions_fase(df_j, "Vuitens", 16), use_container_width=True, hide_index=True)
-    with tab2: st.dataframe(obtenir_prediccions_fase(df_j, "Quarts", 8), use_container_width=True, hide_index=True)
-    with tab3: st.dataframe(obtenir_prediccions_fase(df_j, "Semis", 4), use_container_width=True, hide_index=True)
-    with tab4:
-        finalistes = [afegir_bandera(valor_o_pendent(df_j[c].values[0])) if c in df_j.columns else "Pendent" for c in ["Final_1", "Final_2"]]
-        st.dataframe(pd.DataFrame({"Finalista": ["Finalista 1", "Finalista 2"], "Equip": finalistes}), use_container_width=True, hide_index=True)
-    with tab5:
-        campio = valor_o_pendent(df_j["Campió"].values[0]) if "Campió" in df_j.columns else "Pendent"
-        st.dataframe(pd.DataFrame({"Concepte": ["Campió previst"], "Equip": [afegir_bandera(campio)]}), use_container_width=True, hide_index=True)
+    with tab1: st.dataframe(obtenir_prediccions_fase(df_j, "Vuitens", 16, team_max_phase, dead_teams, vuitens_complet, 1), use_container_width=True, hide_index=True)
+    with tab2: st.dataframe(obtenir_prediccions_fase(df_j, "Quarts", 8, team_max_phase, dead_teams, vuitens_complet, 2), use_container_width=True, hide_index=True)
+    with tab3: st.dataframe(obtenir_prediccions_fase(df_j, "Semis", 4, team_max_phase, dead_teams, vuitens_complet, 3), use_container_width=True, hide_index=True)
+    with tab4: st.dataframe(obtenir_prediccions_fase(df_j, "Final", 2, team_max_phase, dead_teams, vuitens_complet, 4), use_container_width=True, hide_index=True)
+    with tab5: st.dataframe(obtenir_prediccions_fase(df_j, "Campió", 1, team_max_phase, dead_teams, vuitens_complet, 5), use_container_width=True, hide_index=True)
 
 
 # --------------------------------------------------
@@ -543,7 +630,6 @@ st.markdown(
 excel_mtime = os.path.getmtime(EXCEL_FILE) if os.path.exists(EXCEL_FILE) else 0
 data_actualitzacio = obtenir_data_actualitzacio_fitxer(EXCEL_FILE)
 
-# LLegim també df_calendari de la funció carregar_dades actualitzada
 df_porra, df_resultats, df_calendari = carregar_dades(EXCEL_FILE, excel_mtime)
 
 df_ranking = aplicar_moviment(crear_ranking_des_de_porra(df_porra), excel_mtime)
@@ -575,7 +661,6 @@ if "Canvi posició" in df_ranking.columns:
     max_p = df_ranking["Canvi posició"].max()
     min_p = df_ranking["Canvi posició"].min()
     
-    # Només mostrem la secció si hi ha hagut algun moviment real
     if pd.notna(max_p) and pd.notna(min_p) and (max_p > 0 or min_p < 0):
         st.write("### 🎢 La muntanya russa de posicions")
         html_mov = "<div class='card-grid-2'>"
@@ -680,7 +765,7 @@ if jugador is not None:
         c2.write(f"⚽ Bota d'Or: {val_bota}{gols_bota_str}")
 
         mostrar_prediccions_grups_participant(df_j, df_resultats)
-        mostrar_prediccions_eliminatoria_participant(df_j)
+        mostrar_prediccions_eliminatoria_participant(df_j, df_resultats, df_calendari)
 else:
     st.info("Selecciona un participant per veure el detall de punts i prediccions.")
 
@@ -728,14 +813,11 @@ else:
 st.subheader("📅 Calendari i Resultats dels Partits")
 
 if not df_calendari.empty:
-    # --- AFEGEIX AQUESTES DUES LÍNIES PER ARREGLAR LA DATA ---
     if "Data" in df_calendari.columns:
         df_calendari["Data"] = pd.to_datetime(df_calendari["Data"], errors="coerce").dt.strftime("%d/%m/%Y").fillna("")
-    # ---------------------------------------------------------
-    # Netejar la columna de resultats per fer el filtrat
+        
     df_calendari["Resultat_Net"] = df_calendari["Resultat"].astype(str).str.strip().str.lower()
     
-    # Separem els que tenen resultat marcat i els que posa "Pendent" o estan buits
     df_finalitzats = df_calendari[~df_calendari["Resultat_Net"].isin(["pendent", "nan", ""])]
     df_pendents = df_calendari[df_calendari["Resultat_Net"].isin(["pendent", "nan", ""])]
     
@@ -743,13 +825,15 @@ if not df_calendari.empty:
     
     with tab_recents:
         if not df_finalitzats.empty:
-            st.dataframe(df_finalitzats[["Fase", "Grup", "Partit", "Data", "Resultat"]], use_container_width=True, hide_index=True)
+            cols_fin = [c for c in ["Fase", "Partit", "Data", "Resultat"] if c in df_finalitzats.columns]
+            st.dataframe(df_finalitzats[cols_fin], use_container_width=True, hide_index=True)
         else:
             st.info("Encara no hi ha resultats registrats.")
             
     with tab_proxims:
         if not df_pendents.empty:
-            st.dataframe(df_pendents[["Fase", "Grup", "Partit", "Data", "Hora"]], use_container_width=True, hide_index=True)
+            cols_pend = [c for c in ["Fase", "Partit", "Data", "Hora"] if c in df_pendents.columns]
+            st.dataframe(df_pendents[cols_pend], use_container_width=True, hide_index=True)
         else:
             st.info("No hi ha partits pendents.")
 else:
