@@ -417,6 +417,366 @@ def obtenir_pichichi_real(df_resultats_display, col_pichichi, col_gols):
     jugadors_top = taula[taula[col_gols] == taula[col_gols].max()][col_pichichi].tolist()
     return " · ".join(jugadors_top), str(int(taula[col_gols].max()))
 
+
+# --------------------------------------------------
+# V11.1 PRE-FINAL: EVOLUCIÓ PER RONDA I PREDICCIONS FINAL
+# --------------------------------------------------
+def valor_numeric_fila(df_j, columna):
+    if columna not in df_j.columns:
+        return 0.0
+    valor = pd.to_numeric(df_j[columna].values[0], errors="coerce")
+    return 0.0 if pd.isna(valor) else float(valor)
+
+def obtenir_evolucio_punts_ronda(df_j):
+    grups = (
+        valor_numeric_fila(df_j, "Punts Grups 1r") +
+        valor_numeric_fila(df_j, "Punts Grups 2n") +
+        valor_numeric_fila(df_j, "Punts Grups 3r")
+    )
+    punts_rondes = [
+        ("Grups", grups),
+        ("Vuitens", valor_numeric_fila(df_j, "Punts Vuitens")),
+        ("Quarts", valor_numeric_fila(df_j, "Punts Quarts")),
+        ("Semis", valor_numeric_fila(df_j, "Punts Semis")),
+        ("Finalistes", valor_numeric_fila(df_j, "Punts Finalistes")),
+        ("Campió", valor_numeric_fila(df_j, "Punts Campió")),
+        ("Resultat final", valor_numeric_fila(df_j, "Punts Resultat Final")),
+        ("MVP", valor_numeric_fila(df_j, "Punts MVP")),
+        ("Bota d'Or", valor_numeric_fila(df_j, "Punts Pichichi")),
+    ]
+    acumulat = 0.0
+    files = []
+    for ronda, punts in punts_rondes:
+        punts = 0.0 if pd.isna(punts) else float(punts)
+        acumulat += punts
+        files.append({"Ronda": ronda, "Punts ronda": round(punts, 1), "Acumulat": round(acumulat, 1)})
+    total_excel = valor_numeric_fila(df_j, "Total Punts")
+    if total_excel and abs(total_excel - acumulat) > 0.05:
+        files.append({"Ronda": "Total Excel", "Punts ronda": round(total_excel - acumulat, 1), "Acumulat": round(total_excel, 1)})
+    return pd.DataFrame(files)
+
+def mostrar_evolucio_punts_ronda(df_j):
+    st.write("### 📈 Evolució de punts per ronda")
+    df_evo = obtenir_evolucio_punts_ronda(df_j)
+    if df_evo.empty:
+        st.info("No hi ha dades de punts per ronda.")
+        return
+    ordre = df_evo["Ronda"].tolist()
+    line = alt.Chart(df_evo).mark_line(point=True, strokeWidth=4, color="#0b70c9").encode(
+        x=alt.X("Ronda:N", sort=ordre, title=None, axis=alt.Axis(labelAngle=-35)),
+        y=alt.Y("Acumulat:Q", title="Punts acumulats", scale=alt.Scale(zero=True)),
+        tooltip=["Ronda", alt.Tooltip("Punts ronda:Q", format=".1f"), alt.Tooltip("Acumulat:Q", format=".1f")]
+    )
+    text = alt.Chart(df_evo).mark_text(dy=-12, fontSize=12, fontWeight="bold", color="#102a43").encode(
+        x=alt.X("Ronda:N", sort=ordre),
+        y="Acumulat:Q",
+        text=alt.Text("Acumulat:Q", format=".1f")
+    )
+    st.altair_chart((line + text).properties(height=330).configure_view(strokeWidth=0), use_container_width=True, theme="streamlit")
+    st.dataframe(df_evo, use_container_width=True, hide_index=True, column_config={
+        "Punts ronda": st.column_config.NumberColumn("Punts ronda", format="%.1f"),
+        "Acumulat": st.column_config.NumberColumn("Acumulat", format="%.1f"),
+    })
+
+
+def obtenir_evolucio_tots_participants(df_porra):
+    files = []
+    for _, row in df_porra.iterrows():
+        participant = str(row.get("Participants", "")).strip()
+        if participant == "" or participant.lower() in ["nan", "total"] or "total" in participant.lower():
+            continue
+        df_j = pd.DataFrame([row])
+        df_evo = obtenir_evolucio_punts_ronda(df_j)
+        if df_evo.empty:
+            continue
+        for _, evo in df_evo.iterrows():
+            ronda = str(evo.get("Ronda", ""))
+            if ronda == "Total Excel":
+                continue
+            files.append({"Participant": participant, "Participant curt": reduir_nom(participant), "Ronda": ronda, "Punts acumulats": float(evo.get("Acumulat", 0))})
+    return pd.DataFrame(files)
+
+def mostrar_evolucio_tots_participants(df_porra):
+    st.subheader("📈 Evolució de punts per ronda")
+    df_evo = obtenir_evolucio_tots_participants(df_porra)
+    if df_evo.empty:
+        st.info("No hi ha dades suficients per mostrar l’evolució de punts per ronda.")
+        return
+    ordre = ["Grups", "Vuitens", "Quarts", "Semis", "Finalistes", "Campió", "Resultat final", "MVP", "Bota d'Or"]
+    rondes_existents = [r for r in ordre if r in df_evo["Ronda"].unique()]
+    ordre_llegenda = df_evo.groupby("Participant curt", as_index=False)["Punts acumulats"].max().sort_values("Punts acumulats", ascending=False)["Participant curt"].tolist()
+    max_punts = float(df_evo["Punts acumulats"].max()) if not df_evo.empty else 40.0
+    domini_y = [35, max(40.0, max_punts + 2)]
+    ultima_ronda = rondes_existents[-1] if rondes_existents else None
+    df_labels = df_evo[df_evo["Ronda"] == ultima_ronda].copy() if ultima_ronda else pd.DataFrame()
+    st.caption("Llegenda ordenada de més a menys punts. Passant el cursor pels punts veuràs el participant i el detall; a l’última boleta també surt el nom abreujat.")
+    base = alt.Chart(df_evo).encode(
+        x=alt.X("Ronda:N", sort=rondes_existents, title=None, axis=alt.Axis(labelAngle=-35, labelFontSize=12)),
+        y=alt.Y("Punts acumulats:Q", title="Punts acumulats", scale=alt.Scale(domain=domini_y, zero=False)),
+        color=alt.Color("Participant curt:N", sort=ordre_llegenda, title="Participants", legend=alt.Legend(orient="right", columns=1, labelLimit=190, labelFontSize=11, titleFontSize=13, symbolSize=90)),
+        tooltip=["Participant", "Participant curt", "Ronda", alt.Tooltip("Punts acumulats:Q", format=".1f")]
+    )
+    lines = base.mark_line(point=False, strokeWidth=2.25)
+    points = base.mark_circle(size=58, opacity=0.9)
+    labels = alt.Chart(df_labels).mark_text(align="left", dx=8, fontSize=11, fontWeight="bold").encode(
+        x=alt.X("Ronda:N", sort=rondes_existents),
+        y=alt.Y("Punts acumulats:Q", scale=alt.Scale(domain=domini_y, zero=False)),
+        text="Participant curt:N",
+        color=alt.Color("Participant curt:N", sort=ordre_llegenda, legend=None),
+        tooltip=["Participant", "Ronda", alt.Tooltip("Punts acumulats:Q", format=".1f")]
+    ) if not df_labels.empty else alt.Chart(pd.DataFrame({"x": []})).mark_text()
+    st.altair_chart((lines + points + labels).properties(height=max(560, min(1040, 26 * max(10, len(ordre_llegenda))))).configure_view(strokeWidth=0), use_container_width=True, theme="streamlit")
+
+def obtenir_evolucio_departaments(df_porra):
+    col_dep = obtenir_columna_departament(df_porra)
+    if col_dep is None:
+        return pd.DataFrame()
+    df_base = df_porra.copy()
+    df_base[col_dep] = df_base[col_dep].fillna("Sense departament").astype(str).str.strip().replace("", "Sense departament")
+    files = []
+    for _, row in df_base.iterrows():
+        participant = str(row.get("Participants", "")).strip()
+        if participant == "" or participant.lower() in ["nan", "total"] or "total" in participant.lower():
+            continue
+        departament = str(row.get(col_dep, "Sense departament")).strip() or "Sense departament"
+        df_j = pd.DataFrame([row])
+        df_evo = obtenir_evolucio_punts_ronda(df_j)
+        for _, evo in df_evo.iterrows():
+            ronda = str(evo.get("Ronda", ""))
+            if ronda == "Total Excel":
+                continue
+            files.append({"Departament": departament, "Ronda": ronda, "Punts acumulats": float(evo.get("Acumulat", 0))})
+    if not files:
+        return pd.DataFrame()
+    df = pd.DataFrame(files)
+    return df.groupby(["Departament", "Ronda"], as_index=False)["Punts acumulats"].mean().round({"Punts acumulats": 1})
+
+def mostrar_evolucio_departaments(df_porra):
+    st.write("#### 📈 Evolució de punts per departament")
+    df_dep_evo = obtenir_evolucio_departaments(df_porra)
+    if df_dep_evo.empty:
+        st.info("No hi ha dades suficients per mostrar l’evolució per departaments.")
+        return
+    ordre = ["Grups", "Vuitens", "Quarts", "Semis", "Finalistes", "Campió", "Resultat final", "MVP", "Bota d'Or"]
+    rondes_existents = [r for r in ordre if r in df_dep_evo["Ronda"].unique()]
+    deps = df_dep_evo.groupby("Departament", as_index=False)["Punts acumulats"].max().sort_values("Punts acumulats", ascending=False)["Departament"].tolist()
+    max_punts = float(df_dep_evo["Punts acumulats"].max()) if not df_dep_evo.empty else 40.0
+    domini_y = [35, max(40.0, max_punts + 2)]
+    ultima_ronda = rondes_existents[-1] if rondes_existents else None
+    df_labels = df_dep_evo[df_dep_evo["Ronda"] == ultima_ronda].copy() if ultima_ronda else pd.DataFrame()
+    base = alt.Chart(df_dep_evo).encode(
+        x=alt.X("Ronda:N", sort=rondes_existents, title=None, axis=alt.Axis(labelAngle=-35, labelFontSize=12)),
+        y=alt.Y("Punts acumulats:Q", title="Mitjana punts acumulats", scale=alt.Scale(domain=domini_y, zero=False)),
+        color=alt.Color("Departament:N", sort=deps, title="Departaments", legend=alt.Legend(orient="right", columns=1, labelLimit=240, labelFontSize=12, titleFontSize=13, symbolSize=120)),
+        tooltip=["Departament", "Ronda", alt.Tooltip("Punts acumulats:Q", format=".1f")]
+    )
+    lines = base.mark_line(point=False, strokeWidth=3)
+    points = base.mark_circle(size=70, opacity=0.9)
+    labels = alt.Chart(df_labels).mark_text(align="left", dx=8, fontSize=12, fontWeight="bold").encode(
+        x=alt.X("Ronda:N", sort=rondes_existents),
+        y=alt.Y("Punts acumulats:Q", scale=alt.Scale(domain=domini_y, zero=False)),
+        text="Departament:N",
+        color=alt.Color("Departament:N", sort=deps, legend=None),
+        tooltip=["Departament", "Ronda", alt.Tooltip("Punts acumulats:Q", format=".1f")]
+    ) if not df_labels.empty else alt.Chart(pd.DataFrame({"x": []})).mark_text()
+    st.altair_chart((lines + points + labels).properties(height=max(460, 42 * max(6, len(deps)))).configure_view(strokeWidth=0), use_container_width=True, theme="streamlit")
+
+def preparar_prediccions_resultat_final(df_porra):
+    col_res = trobar_col_resultat_final_porra(df_porra)
+    if col_res is None or "Participants" not in df_porra.columns:
+        return pd.DataFrame(), pd.DataFrame()
+    df = df_porra[["Participants", col_res]].copy()
+    df.columns = ["Participant", "Resultat apostat"]
+    df["Participant"] = df["Participant"].astype(str).str.strip()
+    df["Resultat apostat"] = df["Resultat apostat"].apply(valor_o_pendent)
+    df = df[(df["Participant"] != "") & (df["Resultat apostat"] != "Pendent")]
+    df["Participant curt"] = df["Participant"].apply(reduir_nom)
+    detall = df[["Participant", "Resultat apostat"]].sort_values(["Resultat apostat", "Participant"]).reset_index(drop=True)
+    agrupat = df.groupby("Resultat apostat", as_index=False).agg(
+        Participants=("Participant curt", lambda noms: ", ".join(sorted([str(n) for n in noms if str(n).strip()]))),
+        Total=("Participant curt", "count")
+    ).sort_values(["Total", "Resultat apostat"], ascending=[False, True]).reset_index(drop=True)
+    agrupat = agrupat[["Resultat apostat", "Participants", "Total"]]
+    return detall, agrupat
+
+def opcio_mes_apostada(df_porra, columna):
+    if columna not in df_porra.columns or "Participants" not in df_porra.columns:
+        return "Pendent", ""
+    df = df_porra[["Participants", columna]].copy()
+    df[columna] = df[columna].apply(valor_o_pendent)
+    df = df[df[columna] != "Pendent"]
+    if df.empty:
+        return "Pendent", ""
+    recompte = df.groupby(columna)["Participants"].apply(lambda s: ", ".join(sorted(s.astype(str).apply(reduir_nom)))).reset_index(name="Participants")
+    recompte["Total"] = recompte["Participants"].apply(lambda x: len([n for n in x.split(", ") if n]))
+    recompte = recompte.sort_values(["Total", columna], ascending=[False, True]).reset_index(drop=True)
+    valor = recompte.iloc[0][columna]
+    participants = recompte.iloc[0]["Participants"]
+    return valor, participants
+
+
+# --------------------------------------------------
+# V11.3.2 · TENDENCIA DEL RESULTAT NUMERIC DE LA FINAL
+# --------------------------------------------------
+def extreure_marcador_final(valor):
+    """Extreu gols Espanya-local i Argentina-visitant des de textos tipus 2-1, 2 - 1, Espanya 2-1 Argentina."""
+    if pd.isna(valor):
+        return None
+    text = str(valor).strip()
+    if text == "" or normalitzar_text(text) in ["pendent", "nan", "nat", "none"]:
+        return None
+    nums = re.findall(r"\d+", text)
+    if len(nums) < 2:
+        return None
+    try:
+        return int(nums[0]), int(nums[1])
+    except Exception:
+        return None
+
+def preparar_tendencia_resultat_final(df_porra):
+    col_res = trobar_col_resultat_final_porra(df_porra)
+    if col_res is None or "Participants" not in df_porra.columns:
+        return pd.DataFrame(), {}
+    files = []
+    for _, row in df_porra.iterrows():
+        participant = str(row.get("Participants", "")).strip()
+        if participant == "" or participant.lower() == "nan" or "total" in participant.lower():
+            continue
+        resultat = valor_o_pendent(row.get(col_res, ""))
+        marcador = extreure_marcador_final(resultat)
+        if marcador is None:
+            continue
+        gols_esp, gols_arg = marcador
+        if gols_esp > gols_arg:
+            tendencia = "Espanya"
+        elif gols_arg > gols_esp:
+            tendencia = "Argentina"
+        else:
+            tendencia = "Empat"
+        files.append({
+            "Participant": participant,
+            "Participant curt": reduir_nom(participant),
+            "Resultat apostat": resultat,
+            "Gols Espanya": gols_esp,
+            "Gols Argentina": gols_arg,
+            "Tendència": tendencia,
+        })
+    df = pd.DataFrame(files)
+    if df.empty:
+        return df, {
+            "espanya": 0, "argentina": 0, "empat": 0,
+            "avg_esp": 0.0, "avg_arg": 0.0, "resultat_top": "Pendent", "resultat_top_total": 0,
+            "participants_esp": "", "participants_arg": "", "participants_emp": ""
+        }
+    resultats_counts = df.groupby("Resultat apostat", as_index=False).agg(Total=("Participant", "count")).sort_values(["Total", "Resultat apostat"], ascending=[False, True]).reset_index(drop=True)
+    resultat_top = str(resultats_counts.iloc[0]["Resultat apostat"]) if not resultats_counts.empty else "Pendent"
+    resultat_top_total = int(resultats_counts.iloc[0]["Total"]) if not resultats_counts.empty else 0
+    def participants_tendencia(nom):
+        noms = df[df["Tendència"] == nom]["Participant curt"].dropna().astype(str).tolist()
+        return ", ".join(sorted(noms))
+    resum = {
+        "espanya": int((df["Tendència"] == "Espanya").sum()),
+        "argentina": int((df["Tendència"] == "Argentina").sum()),
+        "empat": int((df["Tendència"] == "Empat").sum()),
+        "avg_esp": round(float(df["Gols Espanya"].mean()), 2),
+        "avg_arg": round(float(df["Gols Argentina"].mean()), 2),
+        "resultat_top": resultat_top,
+        "resultat_top_total": resultat_top_total,
+        "participants_esp": participants_tendencia("Espanya"),
+        "participants_arg": participants_tendencia("Argentina"),
+        "participants_emp": participants_tendencia("Empat"),
+    }
+    return df, resum
+
+def mostrar_resum_visual_resultats_apostats(df_porra):
+    df_tend, resum = preparar_tendencia_resultat_final(df_porra)
+    if df_tend.empty:
+        st.info("Encara no hi ha resultats finals apostats amb marcador numèric.")
+        return
+    st.write("### ⚽ Resum visual dels resultats apostats")
+    guanya = "Espanya" if resum["espanya"] > resum["argentina"] else ("Argentina" if resum["argentina"] > resum["espanya"] else "Empat")
+    st.markdown(
+        f"""
+        <div class='final-summary-box'>
+            <h3>📊 Lectura ràpida</h3>
+            <p><strong>Tendència principal:</strong> {guanya}</p>
+            <p><strong>Mitjana de gols prevista:</strong> Espanya {resum['avg_esp']:.2f} · Argentina {resum['avg_arg']:.2f}</p>
+            <p><strong>Resultat més repetit:</strong> {resum['resultat_top']} ({resum['resultat_top_total']} participants)</p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    resultats = df_tend.groupby("Resultat apostat", as_index=False).agg(
+        Total=("Participant", "count"),
+        Participants=("Participant curt", lambda noms: ", ".join(sorted([str(n) for n in noms if str(n).strip()])))
+    ).sort_values(["Total", "Resultat apostat"], ascending=[False, True]).reset_index(drop=True)
+    chart = alt.Chart(resultats.head(12)).mark_bar(cornerRadiusEnd=6).encode(
+        x=alt.X("Total:Q", title="Participants"),
+        y=alt.Y("Resultat apostat:N", sort="-x", title="Resultat apostat"),
+        color=alt.Color("Total:Q", scale=alt.Scale(scheme="blues"), legend=None),
+        tooltip=["Resultat apostat", "Total", "Participants"]
+    ).properties(height=max(260, min(520, 34 * len(resultats.head(12)))))
+    text = chart.mark_text(align="left", baseline="middle", dx=6, fontWeight="bold", color="#334e68").encode(text="Total:Q")
+    st.altair_chart((chart + text).configure_view(strokeWidth=0), use_container_width=True, theme="streamlit")
+    with st.expander("👥 Veure participants per tendència", expanded=False):
+        st.markdown(f"**🇪🇸 Victòria Espanya ({resum['espanya']})**")
+        st.write(resum["participants_esp"] if resum["participants_esp"] else "Cap")
+        st.markdown(f"**🇦🇷 Victòria Argentina ({resum['argentina']})**")
+        st.write(resum["participants_arg"] if resum["participants_arg"] else "Cap")
+        st.markdown(f"**🤝 Empat ({resum['empat']})**")
+        st.write(resum["participants_emp"] if resum["participants_emp"] else "Cap")
+
+def mostrar_prediccions_resultat_final(df_porra):
+    st.subheader("🏁 Prediccions del resultat final")
+    detall, agrupat = preparar_prediccions_resultat_final(df_porra)
+    if detall.empty and agrupat.empty:
+        st.info("Encara no hi ha prediccions del resultat final o no s’ha trobat la columna corresponent.")
+        return
+    tab_resum, tab_detall = st.tabs(["📊 Resultats apostats", "👥 Prediccions per participant"])
+    with tab_resum:
+        st.dataframe(agrupat, use_container_width=True, hide_index=True, column_config={
+            "Resultat apostat": st.column_config.TextColumn("Resultat apostat"),
+            "Participants": st.column_config.TextColumn("Participants"),
+            "Total": st.column_config.NumberColumn("Total", format="%d"),
+        })
+    with tab_detall:
+        st.dataframe(detall, use_container_width=True, hide_index=True)
+    mostrar_resum_visual_resultats_apostats(df_porra)
+
+def mostrar_estadistiques_prefinal(df_porra):
+    st.subheader("📊 Estadístiques pre-final")
+    _, resultats_agrupats = preparar_prediccions_resultat_final(df_porra)
+    df_tend, resum = preparar_tendencia_resultat_final(df_porra)
+    resultat_top = resum.get("resultat_top", "Pendent")
+    resultat_top_total = resum.get("resultat_top_total", 0)
+
+    dades = [
+        ("🇪🇸 Victòria Espanya", resum.get("espanya", 0), f"Mitjana gols: {resum.get('avg_esp', 0):.2f}", "bluecard"),
+        ("🇦🇷 Victòria Argentina", resum.get("argentina", 0), f"Mitjana gols: {resum.get('avg_arg', 0):.2f}", "greencard"),
+        ("🤝 Empat", resum.get("empat", 0), "Marcador igualat", "purplecard"),
+        ("🏁 Resultat més apostat", resultat_top, f"{resultat_top_total} participants", "darkcard"),
+    ]
+    html = "<div class='final-trend-grid'>"
+    for titol, valor, sub, classe in dades:
+        if isinstance(valor, int):
+            principal = f"{valor}"
+            peu = "participants"
+        else:
+            principal = valor
+            peu = sub
+            sub = ""
+        html += f"<div class='card final-trend-card {classe}'><h3>{titol}</h3><h1>{principal}</h1><div class='trend-sub'>{peu}</div>{f'<div class=\"trend-sub\">{sub}</div>' if sub else ''}</div>"
+    html += "</div>"
+    st.markdown(html, unsafe_allow_html=True)
+
+    with st.expander("👥 Veure qui aposta per cada signe de la final", expanded=False):
+        st.markdown(f"**🇪🇸 Victòria Espanya ({resum.get('espanya', 0)})**")
+        st.write(resum.get("participants_esp", "") or "Cap")
+        st.markdown(f"**🇦🇷 Victòria Argentina ({resum.get('argentina', 0)})**")
+        st.write(resum.get("participants_arg", "") or "Cap")
+        st.markdown(f"**🤝 Empat ({resum.get('empat', 0)})**")
+        st.write(resum.get("participants_emp", "") or "Cap")
+
 def obtenir_prediccions_fase(df_j, prefix, quantitat, team_max_phase, dead_teams, vuitens_complet, fase_idx):
     files = []
     for i in range(1, quantitat + 1):
@@ -599,6 +959,59 @@ def mostrar_prediccions_eliminatoria_participant(df_j, df_resultats, df_calendar
     with tab5: st.dataframe(obtenir_prediccions_fase(df_j, "Campió", 1, team_max_phase, dead_teams, vuitens_complet, 5), use_container_width=True, hide_index=True)
 
 
+
+# --------------------------------------------------
+# V11.3 · DASHBOARD FINAL DE GUANYADORS I CLAUS
+# --------------------------------------------------
+def mostrar_dashboard_final_professional(df_ranking, df_departaments, df_porra, df_resultats_display):
+    if df_ranking.empty:
+        return
+    guanyador = df_ranking.iloc[0]
+    segon = df_ranking.iloc[1] if len(df_ranking) > 1 else None
+    tercer = df_ranking.iloc[2] if len(df_ranking) > 2 else None
+    lider_dep_txt = "Pendent"
+    if df_departaments is not None and not df_departaments.empty:
+        dep = df_departaments.iloc[0]
+        lider_dep_txt = f"{dep['Departament']} · {float(dep['Mitjana_punts']):.1f} pts mitjana"
+    campio_real = afegir_bandera(primer_valor_o_pendent(df_resultats_display, "Campió")) if df_resultats_display is not None else "Pendent"
+    resultat_final_real = primer_valor_o_pendent(df_resultats_display, "Resultat Final") if df_resultats_display is not None else "Pendent"
+    pichichi_real, gols_pichichi = obtenir_pichichi_real(df_resultats_display, "Jugador Pichichi", "Gols") if df_resultats_display is not None else ("Pendent", "Pendent")
+    bota_text = f"{pichichi_real} ({gols_pichichi})" if gols_pichichi != "Pendent" else pichichi_real
+    col_res = trobar_col_resultat_final_porra(df_porra)
+    total_resultats = len(df_porra[df_porra[col_res].apply(valor_o_pendent) != "Pendent"]) if col_res is not None else 0
+    podi_html = ""
+    for medalla, row in [("🥇", guanyador), ("🥈", segon), ("🥉", tercer)]:
+        if row is not None:
+            podi_html += f"<span class='final-pill'>{medalla} {row['Participant']} · {float(row['Punts']):.1f}</span>"
+    st.markdown(f"""
+    <div class='final-dashboard'>
+        <h2>🏆 Dashboard final · Porra Mundial</h2>
+        <p>Resum visual dels guanyadors, el podi i les claus principals del torneig.</p>
+        <div class='final-grid'>
+            <div class='final-hero'>
+                <h3>Guanyador de la porra</h3>
+                <div class='winner'>{guanyador['Participant']}</div>
+                <div class='points'>{float(guanyador['Punts']):.1f} punts</div>
+                <div class='final-pills'>{podi_html}</div>
+            </div>
+            <div class='final-mini'>
+                <h3>🏢 Departament destacat</h3>
+                <div class='big'>{lider_dep_txt}</div>
+                <p>Classificació calculada per mitjana de punts.</p>
+            </div>
+            <div class='final-mini'>
+                <h3>🔑 Claus del torneig</h3>
+                <div class='final-pills'>
+                    <span class='final-pill'>Campió: {campio_real}</span>
+                    <span class='final-pill'>Final: {resultat_final_real}</span>
+                    <span class='final-pill'>Bota d'Or: {bota_text}</span>
+                    <span class='final-pill'>{total_resultats} prediccions de resultat</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
 # --------------------------------------------------
 # ESTILS + FONS
 # --------------------------------------------------
@@ -624,11 +1037,38 @@ st.markdown(
     .greencard {{ background: linear-gradient(135deg, #0f9d58, #8ee6b3); color: white; }}
     .redcard {{ background: linear-gradient(135deg, #dc3545, #f1aeb5); color: white; }}
     .darkcard {{ background: linear-gradient(135deg, #102a43, #486581); color: white; }}
-    .purplecard {{ background: linear-gradient(135deg, #6f42c1, #b982ff); color: white; margin-top: 18px; margin-bottom: 18px; }}
+    .purplecard {{ background: linear-gradient(135deg, #6f42c1, #b982ff); color: white; }}
     .card h3 {{ margin: 0px 0px 14px 0px; font-size: clamp(15px, 2vw, 24px); line-height: 1.15; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
     .card h1 {{ margin: 0px; font-size: clamp(24px, 4vw, 40px); line-height: 1.1; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
     .card p {{ margin: 12px 0px 0px 0px; font-size: clamp(11px, 1.5vw, 15px); max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-    @media (max-width: 768px) {{ .block-container {{ padding-left: 0.8rem; padding-right: 0.8rem; border-radius: 16px; }} .card-grid-2, .card-grid-3, .card-grid-4 {{ grid-template-columns: 1fr; }} .card {{ min-height: 140px; }} .card h3, .card h1, .card p {{ white-space: normal; }} }}
+    
+.prefinal-grid {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1.25rem; align-items: stretch; margin-bottom: 0.75rem; }}
+.prefinal-card {{ min-height: 218px !important; height: 218px !important; margin: 0 !important; padding: 22px 18px !important; justify-content: space-between !important; }}
+.prefinal-card h3 {{ min-height: 34px; display: flex; align-items: center; justify-content: center; white-space: normal !important; }}
+.prefinal-card h1 {{ white-space: normal !important; line-height: 1.15 !important; min-height: 58px; display: flex; align-items: center; justify-content: center; }}
+.prefinal-card p {{ white-space: normal !important; font-weight: 700; opacity: 0.95; }}
+.final-dashboard {{ margin-top: 22px; margin-bottom: 28px; padding: 24px; border-radius: 28px; background: linear-gradient(135deg, rgba(16,42,67,0.96), rgba(11,112,201,0.84)); color: white; box-shadow: 0px 14px 40px rgba(0,0,0,0.28); }}
+.final-dashboard h2 {{ color: white !important; margin-top: 0; font-size: clamp(28px, 4vw, 44px); text-shadow: none; }}
+.final-dashboard p {{ color: rgba(255,255,255,0.9); }}
+.final-grid {{ display: grid; grid-template-columns: 1.25fr 1fr 1fr; gap: 1rem; align-items: stretch; }}
+.final-hero, .final-mini {{ background: rgba(255,255,255,0.14); border: 1px solid rgba(255,255,255,0.22); border-radius: 22px; padding: 20px; backdrop-filter: blur(8px); }}
+.final-hero h3, .final-mini h3 {{ color: white !important; margin: 0 0 10px 0; text-shadow: none; }}
+.final-hero .winner {{ font-size: clamp(28px, 4vw, 46px); font-weight: 900; line-height: 1.05; margin: 8px 0; }}
+.final-hero .points {{ font-size: 20px; font-weight: 800; color: #fff1a8; }}
+.final-mini .big {{ font-size: 24px; font-weight: 900; line-height: 1.15; }}
+.final-pills {{ display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }}
+.final-pill {{ background: rgba(255,255,255,0.18); border: 1px solid rgba(255,255,255,0.22); border-radius: 999px; padding: 7px 11px; color: white; font-weight: 700; }}
+@media (max-width: 1100px) {{ .prefinal-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }} .final-grid {{ grid-template-columns: 1fr; }} }}
+
+.final-trend-grid {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1.25rem; align-items: stretch; margin-bottom: 1rem; }}
+.final-trend-card {{ min-height: 214px !important; height: 214px !important; margin: 0 !important; padding: 22px 18px !important; justify-content: center !important; gap: 16px !important; overflow: visible !important; }}
+.final-trend-card h3 {{ margin: 0 !important; min-height: 38px; white-space: normal !important; display: flex; justify-content: center; align-items: center; text-align: center; }}
+.final-trend-card h1 {{ margin: 0 !important; line-height: 1.05 !important; white-space: normal !important; display: flex; justify-content: center; align-items: center; text-align: center; }}
+.final-trend-card .trend-sub {{ font-size: 16px; font-weight: 800; opacity: 0.98; }}
+.final-summary-box {{ padding: 18px 20px; border-radius: 18px; background: rgba(255,255,255,0.78); border: 1px solid rgba(0,0,0,0.08); box-shadow: 0px 4px 18px rgba(0,0,0,0.10); margin-top: 10px; margin-bottom: 16px; }}
+.final-summary-box h3 {{ margin-top: 0 !important; }}
+@media (max-width: 1100px) {{ .final-trend-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }} }}
+@media (max-width: 768px) {{ .block-container {{ padding-left: 0.8rem; padding-right: 0.8rem; border-radius: 16px; }} .card-grid-2, .card-grid-3, .card-grid-4 {{ grid-template-columns: 1fr; }} .card {{ min-height: 140px; }} .card h3, .card h1, .card p {{ white-space: normal; }} }}
     </style>
     """, unsafe_allow_html=True
 )
@@ -662,6 +1102,12 @@ with col_logo:
 # --------------------------------------------------
 st.markdown(f"<div class='card-grid-3'><div class='card darkcard'><h3>🕒 Dades actualitzades</h3><h1>{data_actualitzacio}</h1></div><div class='card greencard'><h3>🎁 Premi guanyador</h3><h1>{premi_guanyador} €</h1><p>{num_participants} participants x {PREU_PARTICIPACIO} €</p></div><div class='card bluecard'><h3>👥 Participants</h3><h1>{num_participants}</h1><p>porres registrades</p></div></div>", unsafe_allow_html=True)
 
+
+# --------------------------------------------------
+# V11.2 · DASHBOARD PRE-FINAL AL PRINCIPI
+# --------------------------------------------------
+mostrar_estadistiques_prefinal(df_porra)
+mostrar_prediccions_resultat_final(df_porra)
 
 # --------------------------------------------------
 # MOVIMENTS DESTACATS (PUJADES I BAIXADES)
@@ -730,8 +1176,7 @@ st.markdown(html_top3 + "</div>", unsafe_allow_html=True)
 st.subheader("📊 Classificació general")
 mostrar_taula_ranking(df_ranking)
 
-st.subheader("📈 Gràfic general de punts")
-mostrar_grafic_punts(df_ranking, color_scheme="blues", altura_minima=1000)
+mostrar_evolucio_tots_participants(df_porra)
 
 # --------------------------------------------------
 # FITXA PARTICIPANT
@@ -799,7 +1244,7 @@ st.subheader("🏢 Competició per departaments")
 if te_departaments:
     st.write("Rànquing calculat per **mitjana de punts** del departament. També es mostren punts totals, millor puntuació i líder del departament.")
     mostrar_taula_departaments(df_departaments)
-    mostrar_grafic_departaments(df_departaments, color_scheme="purples")
+    mostrar_evolucio_departaments(df_porra)
     
     departament_sel = st.selectbox("Selecciona departament", sorted(df_ranking["Departament"].dropna().astype(str).unique()), index=None, placeholder="Selecciona un departament...")
     if departament_sel:
